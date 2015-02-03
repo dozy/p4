@@ -3,6 +3,14 @@
 "version":"1.0",
 "subst_params":[
         {
+                "id":"basic_pipeline_params_file",
+                "required":"yes",
+                "subst_constructor":{
+                        "vals":[ {"subst":"cfgdatadir"}, "/", "alignment_common.json" ],
+                        "postproc":{"op":"concat", "pad":""}
+                }
+        },
+        {
                 "id": "basic_pipeline_params",
                 "type":"SPFILE",
 		"name":{"subst":"basic_pipeline_params_file"},
