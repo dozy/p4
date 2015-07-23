@@ -29,6 +29,10 @@ Readonly::Scalar my $VLMIN => 1;
 Readonly::Scalar my $VLMED => 2;
 Readonly::Scalar my $VLMAX => 3;
 
+Readonly::Scalar my $EWI_INFO => 1;
+Readonly::Scalar my $EWI_WARNING => 2;
+Readonly::Scalar my $EWI_ERROR => 3;
+
 Readonly::Scalar my $MIN_TEMPLATE_VERSION => 1;
 
 my $progname = (fileparse($0))[0];
@@ -80,10 +84,15 @@ my $param_store;
 my $globals = { node_prefixes => { auto_node_prefix => 0, used_prefixes => {}}, vt_file_stack => [], processed_sp_files => {}, template_path => $template_path, };
 
 my $node_tree = process_vtnode(q[], $vtf_name, q[], $param_store, $subst_requests, $globals);    # recursively generate the vtnode tree
+if(report_pv_ewi($node_tree)) { croak qq[Exiting after process_vtnode...\n]; }
+
 my $flat_graph = flatten_tree($node_tree);
 
 if($absolute_program_paths) {
 	foreach my $node_with_cmd ( grep {$_->{'cmd'}} @{$flat_graph->{'nodes'}}) {
+
+		$node_with_cmd->{cmd} = finalise_cmd($node_with_cmd->{cmd});
+
 		my $cmd_ref = \$node_with_cmd->{'cmd'};
 		if(ref ${$cmd_ref} eq 'ARRAY') { $cmd_ref = \${${$cmd_ref}}[0]}
 		${$cmd_ref} =~ s/\A(\S+)/ abs_path( (-x $1 ? $1 : undef) || (which $1) || croak "cannot find program $1" )/e;
@@ -102,11 +111,11 @@ print $out to_json($flat_graph);
 #  vtf_name - name of the file to read for this vtfile
 #  node_prefix - if specified (note: zero-length string is "specified"), prefix all nodes
 #                  from this vtfile with this string; otherwise auto-generate prefix
-#  param_store - a list ref of maps of variable names to their values or constructor;
+#  param_store - a stack of maps of variable names to their values or constructor;
 #                  supplies the values when subst directives are processed
 #  subst_requests - a list ref of key/value pairs, keys are subst_param [var]names, values
-#                    are string values; supplied at run time or via subst_map attributes
-#                    in VTFILE nodes
+#                    are string values or array refs of strings; supplied at run time or
+#                    via subst_map attributes in VTFILE nodes
 #  globals - auxiliary items used for error checking/reporting (and final flattening, e.g.
 #             node_prefix validation and generation for ensuring unique node ids in
 #             subgraphs)
@@ -125,19 +134,30 @@ print $out to_json($flat_graph);
 sub process_vtnode {
 	my ($vtnode_id, $vtf_name, $node_prefix, $param_store, $subst_requests, $globals) = @_;
 
+	my $vtnode = {
+		id => $vtnode_id,
+		name => $vtf_name,
+		cfg => {},
+		children => [],
+		ewi => mkewi(q[PV - node:] . ($vtnode_id? $vtnode_id: q[TOP]) . q[ (] . ($vtf_name? $vtf_name: q[NONAME]) . q[)]) };
+
 	unless(is_valid_name($vtf_name)) {
-		$logger->($VLFATAL, q[Missing or invalid name for VTFILE element id], $vtnode_id, q[ (], , join(q[->], @{$globals->{vt_file_stack}}), q[)]);
+		$vtnode->{ewi}->{additem}->($EWI_ERROR, 0, q[Missing or invalid name for VTFILE element id: ], $vtnode_id, q[ (], , join(q[->], @{$globals->{vt_file_stack}}), q[)]);
+
+		return $vtnode;
 	}
 
 	if(any { $_ eq $vtf_name} @{$globals->{vt_file_stack}}) {
-		$logger->($VLFATAL, q[Nesting of VTFILE ], $vtf_name, q[ within itself: ], join(q[->], @{$globals->{vt_file_stack}}));
+		$vtnode->{ewi}->{additem}->($EWI_ERROR, 0, q[Nesting of VTFILE ], $vtf_name, q[ within itself: ], join(q[->], @{$globals->{vt_file_stack}}));
+
+		return $vtnode;
 	}
 
-	my $vtnode = { id => $vtnode_id, name => $vtf_name, cfg => {}, children => [], };
 	$vtnode->{node_prefix} = get_node_prefix($node_prefix, $globals->{node_prefixes});
 	$vtnode->{cfg} = read_vtf_version_check($vtf_name, $MIN_TEMPLATE_VERSION, $globals->{template_path}, );
-	$param_store = process_subst_params($param_store, $subst_requests, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals);
-	apply_subst($vtnode->{cfg}, $param_store, $subst_requests);   # process any subst directives in cfg (just nodes and edges)
+	$param_store = process_subst_params($param_store, $subst_requests, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals, $vtnode->{ewi});
+
+	apply_subst($vtnode->{cfg}, $param_store, $subst_requests, $vtnode->{ewi});   # process any subst directives in cfg (just nodes and edges)
 
 	my @vtf_nodes = ();
 	my @nonvtf_nodes = ();
@@ -197,9 +217,9 @@ sub get_node_prefix {
 
 #######################################################################################
 # process_subst_params:
-#  param_store - a list (ref) of maps of variable names to their values or constructor;
+#  param_store - a stack of maps of variable names to their values or constructor;
 #                  supplies the values when subst directives are processed
-#  subst_requests - a list (ref) of key/value pairs. Keys are subst_param varnames,
+#  subst_requests - a stack of key/value pairs. Keys are subst_param varnames,
 #                    values are string values; supplied at run time or via subst_map
 #                    attributes in VTFILE nodes; used here to expand subst directives
 #                    that appear in subst_param entries
@@ -211,11 +231,12 @@ sub get_node_prefix {
 #                    warning/error reporting
 #  globals - used here to prevent multiple processing of SPFILE nodes and to pass the
 #                  value of template_path
+#  ewi - Error/Warning/Info message handler
 #
 # Description:
 #  process a subst_param section, adding any varnames declared in it to the "local"
-#   param_store and recursively processing any included files specified by elements
-#   of type SPFILE.
+#   param_store (element 0 in the param_store stack) and recursively processing any
+#   included files specified by elements of type SPFILE.
 #
 #  In other words, step through unprocessed subst_param entries:
 #   a) if element is of type PARAM, add it to the "local" param_store
@@ -227,7 +248,7 @@ sub get_node_prefix {
 #  more sophisticated structure for elements on this stack to improve error reporting
 #######################################################################################
 sub process_subst_params {
-	my ($param_store, $subst_requests, $unprocessed_subst_params, $sp_file_stack, $globals) = @_;
+	my ($param_store, $subst_requests, $unprocessed_subst_params, $sp_file_stack, $globals, $ewi) = @_;
 	my @spfile_node_queue = ();
 
 	$param_store ||= [ { varnames => {}, } ];
@@ -246,18 +267,18 @@ sub process_subst_params {
 		elsif($sptype eq q[PARAM]) {
 			# all unprocessed_subst_params elements of type PARAM must have an id
 			if(not $spid) {
-				# it would be better to cache these errors and report as many as possible before exit (TBI)
-				$logger->($VLFATAL, q[No id for PARAM element, entry ], $i, q[ (], , join(q[->], @$sp_file_stack), q[)]);
+				# cache errors so we can report as many as possible before exit
+				$ewi->{additem}->($EWI_ERROR, 0, q[No id for PARAM element, entry ], $i, q[ (], , join(q[->], @$sp_file_stack), q[)]);
 			}
 
 			my $ips = in_param_store($param_store, $spid);
 			if($ips->{errnum} != 0) { # multiply defined - OK unless explicitly declared multiple times at this level
 				if($ips->{errnum} > 0) { # a previous declaration was made by an ancestor of the current vtnode
-					$logger->($VLMED, qq[INFO: Duplicate subst_param definition for $spid (], join(q[->], @$sp_file_stack), q[); ], $ips->{ms});
+					$ewi->{additem}->($EWI_INFO, 2, qq[INFO: Duplicate subst_param definition for $spid (], join(q[->], @$sp_file_stack), q[); ], $ips->{ms});
 				}
 				else {
-					# it would be better to cache these errors and report as many as possible before exit (TBI)
-					$logger->($VLFATAL, qq[Fatal error: Duplicate (local) subst_param definition for $spid (], join(q[->], @$sp_file_stack), q[); ], $ips->{ms});
+					# cache errors so we can report as many as possible before exit
+					$ewi->{additem}->($EWI_ERROR, 0, qq[Fatal error: Duplicate (local) subst_param definition for $spid (], join(q[->], @$sp_file_stack), q[); ], $ips->{ms});
 				}
 			}
 
@@ -266,7 +287,7 @@ sub process_subst_params {
 			$param_store->[0]->{varnames}->{$spid} = $sp; # adding to the "local" variable store
 		}
 		else {
-			$logger->($VLFATAL, q[Unrecognised type for subst_param element: ], $sptype, q[; entry ], $i, q[ (], , join(q[->], @$sp_file_stack), q[)]);
+			$ewi->{additem}->($EWI_ERROR, 0, q[Unrecognised type for subst_param element: ], $sptype, q[; entry ], $i, q[ (], , join(q[->], @$sp_file_stack), q[)]);
 		}
 	}
 
@@ -274,14 +295,15 @@ sub process_subst_params {
 	# now process the SPFILE entries
 	################################
 	for my $spfile (@spfile_node_queue) {
-		subst_walk($spfile, $param_store, $subst_requests, []);
+		my $ewi = mkewi(q[SPF]);
+		subst_walk($spfile, $param_store, $subst_requests, [], $ewi);
+#		if($ewi->{report}->()) { croak q[Exiting after SPFILE processing...]; };
 		my $spname = is_valid_name($spfile->{name});
 		if(not $spname) {
 			# it would be better to cache these errors and report as many as possible before exit (TBI)
-			$logger->($VLFATAL, q[Missing or invalid name for SPFILE element id], $spfile->{id}, q[ (], , join(q[->], @$sp_file_stack), q[)]);
+			$ewi->{additem}->($EWI_ERROR, 0, q[Missing or invalid name for SPFILE element id], $spfile->{id}, q[ (], , join(q[->], @$sp_file_stack), q[)]);
 		}
-
-		if(not $globals->{processed_sp_files}->{$spname}) { # but only process a given SPFILE once
+		elsif(not $globals->{processed_sp_files}->{$spname}) { # but only process a given SPFILE once
 			$globals->{processed_sp_files}->{$spname} = 1;   # flag this SPFILE name as seen
 
 			my $cfg = read_vtf_version_check($spname, $MIN_TEMPLATE_VERSION, $globals->{template_path},);
@@ -290,12 +312,12 @@ sub process_subst_params {
 			#  files must contain (new-style) subst_param sections to be useful
 			if(defined $cfg->{subst_params}) {
 				push @$sp_file_stack, $spname;
-				process_subst_params($param_store, $subst_requests, $cfg->{subst_params}, $sp_file_stack, $globals);
+				process_subst_params($param_store, $subst_requests, $cfg->{subst_params}, $sp_file_stack, $globals, $ewi);
 				pop @$sp_file_stack;
 			}
 		}
 		else {
-			$logger->($VLMAX, qq[INFO: Not processing reoccurrence of SPFILE $spname (], join(q[->], @$sp_file_stack), q[)]);  # needs to be a high-verbosity warning
+			$ewi->{additem}->($EWI_INFO, 3, qq[INFO: Not processing reoccurrence of SPFILE $spname (], join(q[->], @$sp_file_stack), q[)]);
 		}
 	}
 
@@ -335,11 +357,15 @@ sub in_param_store {
 #  replace subst directives with values
 #######################################
 sub apply_subst {
-	my ($cfg, $param_store, $subst_requests) = @_;   # process any subst directives in cfg (just nodes and edges?)
+	my ($cfg, $param_store, $subst_requests, $ewi) = @_;   # process any subst directives in cfg (just nodes and edges?)
 
 	for my $elem (@{$cfg->{nodes}}, @{$cfg->{edges}}) {
-		subst_walk($elem, $param_store, $subst_requests, []);
+		$ewi->{addlabel}->(q{AS [id:} . $elem->{id} . q{]});
+		subst_walk($elem, $param_store, $subst_requests, [], $ewi);
+		$ewi->{removelabel}->();
 	}
+
+	return;
 }
 
 ##############################################################################################################
@@ -348,7 +374,7 @@ sub apply_subst {
 #   lists for the desired key/value pair
 ##############################################################################################################
 sub subst_walk {
-	my ($elem, $param_store, $subst_requests, $labels) = @_;
+	my ($elem, $param_store, $subst_requests, $labels, $ewi) = @_;
 
 	my $r = ref $elem;
 	if(!$r) {
@@ -360,13 +386,13 @@ sub subst_walk {
 			if(ref $elem->{$k} eq q[HASH] and my $param_name = $elem->{$k}->{subst}) {
 				# value for a "subst" key must always be the name of a parameter
 				if(ref $param_name) {
-					$logger->($VLFATAL, q[value for a subst directive must be a param (not a reference), key for subst is: ], $k);
+					$ewi->{additem}->($EWI_ERROR, 0, q[value for a subst directive must be a param (not a reference), key for subst is: ], $k);
 				}
 
-				$elem->{$k} = fetch_subst_value($param_name, $param_store, $subst_requests);
+				$elem->{$k} = fetch_subst_value($param_name, $param_store, $subst_requests, $ewi);
 
 				unless(defined $elem->{$k}) {
-					$logger->($VLFATAL, croak q[Failed to fetch subst value for parameter ], $param_name, q[ (key was ], $k, q[)]);
+					$ewi->{additem}->($EWI_ERROR, 1, q[Failed to fetch subst value for parameter ], $param_name, q[ (key was ], $k, q[)]);
 				}
 
 				next;
@@ -374,21 +400,21 @@ sub subst_walk {
 
 			if(ref $elem->{$k}) {
 				push @$labels, $k;
-				subst_walk($elem->{$k}, $param_store, $subst_requests, $labels);
+				subst_walk($elem->{$k}, $param_store, $subst_requests, $labels, $ewi);
 				pop @$labels;
 			}
 		}
 	}
 	elsif(ref $elem eq q[ARRAY]) {
-		for my $i (0 .. $#{$elem}) {
+		for my $i (reverse (0 .. $#{$elem})) {
 			# if one of the elements is a subst_param hash,
 			if(ref $elem->[$i] eq q[HASH] and my $param_name = $elem->[$i]->{subst}) {
 				# value for a "subst" key must always be the name of a parameter
 				if(ref $param_name) {
-					$logger->($VLFATAL, q[value for a subst directive must be a param name (not a reference), index for subst is: ], $i);
+					$ewi->{additem}->($EWI_ERROR, 0, q[value for a subst directive must be a param name (not a reference), index for subst is: ], $i);
 				}
 
-				my $sval = fetch_subst_value($param_name, $param_store, $subst_requests);
+				my $sval = fetch_subst_value($param_name, $param_store, $subst_requests, $ewi);
 				if(ref $sval eq q[ARRAY]) {
 					splice @$elem, $i, 1, @$sval;
 				}
@@ -397,7 +423,7 @@ sub subst_walk {
 				}
 
 				unless(defined $elem->[$i]) {
-					$logger->($VLFATAL, q[Failed to fetch subst value for parameter ], $param_name, q[ (element index was ], $i);
+					$ewi->{additem}->($EWI_ERROR, 1, q[Failed to fetch subst value for parameter ], $param_name, q[ (element index was ], $i, q[)],);
 				}
 
 				next;
@@ -405,7 +431,7 @@ sub subst_walk {
 
 			if(ref $elem->[$i]) {
 				push @$labels, sprintf(q[ArrayElem%03d], $i);
-				subst_walk($elem->[$i], $param_store, $subst_requests, $labels);
+				subst_walk($elem->[$i], $param_store, $subst_requests, $labels, $ewi);
 				pop @$labels;
 			}
 		}
@@ -413,7 +439,7 @@ sub subst_walk {
 	elsif(ref $elem eq q[JSON::XS::Boolean]) {
 	}
 	else {
-		$logger->($VLMED, "REF TYPE $r currently not processable");
+		$ewi->{add_item}->($EWI_WARNING, 2, "REF TYPE $r currently not processable");
 	}
 
 	return;
@@ -438,7 +464,7 @@ sub subst_walk {
 #       it is a fatal error; otherwise return undef
 ##################################################################
 sub fetch_subst_value {
-	my ($param_name, $param_store, $subst_requests) = @_;
+	my ($param_name, $param_store, $subst_requests, $ewi) = @_;
 	my $param_entry;
 	my $retval;
 
@@ -469,16 +495,16 @@ sub fetch_subst_value {
 	if($param_entry->{subst_constructor}) {
 		my $vals;
 		unless($vals = $param_entry->{subst_constructor}->{vals}) {
-			$logger->($VLFATAL, q[subst_constructor attribute requires a vals attribute, param_name: ], $param_name);
+			$ewi->{additem}->($EWI_ERROR, 0, q[subst_constructor attribute requires a vals attribute, param_name: ], $param_name);
 		}
 
 		unless(ref $vals eq q[ARRAY]) {
-			$logger->($VLFATAL, q[subst_constructor vals attribute must be array, param_name: ], $param_name);
+			$ewi->{additem}->($EWI_ERROR, 0, q[subst_constructor vals attribute must be array, param_name: ], $param_name);
 		}
 
-		for my $i (0..$#$vals) {
+		for my $i (reverse (0..$#$vals)) {
 			if(ref $vals->[$i] eq q[HASH] and $vals->[$i]->{subst}) {
-				$vals->[$i] = fetch_subst_value($vals->[$i]->{subst}, $param_store, $subst_requests);
+				$vals->[$i] = fetch_subst_value($vals->[$i]->{subst}, $param_store, $subst_requests, $ewi);
 				if(ref $vals->[$i] eq q[ARRAY]) {
 					splice(@$vals, $i, 1, (@{$vals->[$i]}));
 				}
@@ -492,8 +518,8 @@ sub fetch_subst_value {
 		} 
 		if(not defined $retval) {
 			# caller should decide if undef is allowed, unless required is true
-			my $severity = (defined $param_entry->{required} and $param_entry->{required} eq q[yes])? $VLFATAL: $VLMED;
-			$logger->($severity, q[INFO: Undefined elements in subst_param array: ], $param_entry->{id});
+			my $severity = (defined $param_entry->{required} and $param_entry->{required} eq q[yes])? $EWI_ERROR: $EWI_WARNING;
+			$ewi->{additem}->($severity, 1, q[Undefined elements in subst_param array: ], $param_entry->{id});
 			return;
 		}
 	}
@@ -503,8 +529,8 @@ sub fetch_subst_value {
 	}
 	else {
 		# caller should decide if undef is allowed, unless required is true
-		my $severity = (defined $param_entry->{required} and $param_entry->{required} eq q[yes])? $VLFATAL: $VLMED;
-		$logger->($severity, q[No value found for param_entry ], $param_name);
+		my $severity = (defined $param_entry->{required} and $param_entry->{required} eq q[yes])? $EWI_ERROR: $EWI_INFO;
+		$ewi->{additem}->($severity, 0, q[No value found for param_entry ], $param_name);
 		return;
 	}
 
@@ -570,6 +596,20 @@ sub resolve_subst_array {
 	}
 
 	return $subst_value;
+}
+
+sub report_pv_ewi {
+	my ($tree_node) = @_; 
+	my $fatality = 0;
+
+	if($tree_node->{ewi}->{report}->(0)) { $fatality = 1; }
+
+	# do the same recursively for any children
+	for my $tn (@{$tree_node->{children}}) {
+		if($tn->{ewi}->{report}->(0)) { $fatality = 1; }
+	}
+
+	return $fatality; # should return some kind of error indicator, I think
 }
 
 #######################################################################################
@@ -764,11 +804,7 @@ sub initialise_subst_requests {
 sub is_valid_name {
 	my ($name, $id) = @_;
 
-	if(not $name) {
-		$logger->($VLMIN, q[No name for element with id ], $id);
-	}
-
-	if(my $r = ref $name) {
+	if(defined $name and my $r = ref $name) {
 		if($r eq q[ARRAY]) {
 			$logger->($VLMIN, q{Element with id }, $id, q{ has name of type ARRAY ref, it should be a string. Elements: [ }, join(q[;], @$name), q{]});
 
@@ -837,6 +873,32 @@ sub find_vtf {
 	$logger->($VLFATAL, q[Failed to find vtf file: ], $vtf_fullname, q[ locally or on template_path: ], join q[:], @$template_path);
 }
 
+###############################################################
+# finalise_cmd: the value of the cmd attribute of an EXEC node
+#  must be either a string or an array ref of strings (no undef
+#  elements). Convert an array of strings and array refs to an
+#  array of strings using splice.
+###############################################################
+sub finalise_cmd {
+	my ($cmd) = @_;
+
+	if(ref $cmd eq q[ARRAY]) {
+		$cmd = [ (grep { defined($_) } @$cmd) ]; # first remove any undefined elements
+
+		for my $i (reverse (0..$#{$cmd})) {
+			if(not defined $cmd->[$i]) {
+				splice @{$cmd->[$i]}, $i, 1;
+			}
+			elsif(ref $cmd->[$i] eq q[ARRAY]) {
+				$cmd->[$i] = finalise_cmd($cmd->[$i]);
+				splice @{$cmd->[$i]}, $i, 1, @{$cmd->[$i]};
+			}
+		}
+	}
+
+	return $cmd;
+}
+
 sub mklogger {
 	my ($verbosity_level, $log, $label) = @_;
 	my $logf;
@@ -879,4 +941,70 @@ sub mklogger {
 	}
 }
 
+################################################################
+# for storing and reporting handling Error/Warning/Info messages
+################################################################
+sub mkewi {
+	my ($init_label) = @_;
+
+	my @labels = (); # list of strings which make up the message label
+	if (defined $init_label) {
+		push @labels, $init_label;
+	}
+	my @list = (); # list of messages
+
+	return {
+		additem => sub {
+			my ($type, $subclass, @ms) = @_;
+
+			my $label = join(":", @labels);
+			my $ms = join("", @ms);
+
+			my $full_ms = sprintf "(%s) - %s\n", $label, $ms;
+
+			push @list, { type => $type, subclass => $subclass, ms => $full_ms };
+
+			return scalar @list;
+		},
+		addlabel => sub {
+			my (@label_elements) = @_;
+
+			my $label = join("", @label_elements);
+
+			push @labels, $label;
+
+			return $label;
+		},
+		removelabel => sub {
+			if(@labels > 0) {
+				pop @labels;
+			}
+
+			return scalar @labels;
+		},
+		clearlabels => sub {
+			@labels = ();
+
+			return;
+		},
+		clearitems => sub {
+			@list = ();
+
+			return;
+		},
+		report => sub {
+			my ($fatality_level) = @_;
+			my $ewi_retstat = 0;
+			my %ewi_type_names = ( $EWI_ERROR => q[Error], $EWI_WARNING => q[Warning], $EWI_INFO => q[Info], );
+
+			for my $ewi_item (@list) {
+				if($ewi_item->{type} == $EWI_ERROR and $ewi_item->{subclass} <= $fatality_level) { $ewi_retstat = 1; }
+
+				printf join("\t", ($ewi_type_names{$ewi_item->{type}}, $ewi_item->{subclass}, $ewi_item->{ms},)), "\n";
+			}
+
+			return $ewi_retstat;
+		}
+	}
+}
 
