@@ -4,7 +4,7 @@
 "subgraph_io":{
 	"ports":{
 		"inputs":{
-			"_stdin_":"bamsort_coord"
+			"_stdin_":"bamsormadup"
 		},
 		"outputs":{
 			"_stdout_":"seqchksum_tee:__FINAL_OUT__"
@@ -24,33 +24,21 @@
 		"id":"bs_tmpfile_flag",
 		"required":"no",
 		"subst_constructor":{
-			"vals":[
-				"tmpfile=",
-				{"subst":"outdatadir"},
-				"/",
-				{"subst":"bstmp"},
-				"_",
-				{"subst":"rpt"},
-				{"subst":"phix_or_target"},
-				".tmp"
-			],
+			"vals":[ "tmpfile=", {"subst":"outdatadir"}, "/", {"subst":"bstmp"}, "_", {"subst":"rpt"}, {"subst":"phix_or_target"}, ".tmp" ],
 			"postproc":{"op":"concat", "pad":""}
 		}
 	},
 	{
-		"id":"bamsort_coord",
-		"required":"yes",
+		"id":"bsmd_threads_flag",
+		"comment":"number of threads used by bamsormadup (same as aligner_numthreads by default)",
+		"subst_constructor":{ "vals":[ "threads", {"subst":"aligner_numthreads"} ], "postproc":{"op":"concat", "pad":"=" } }
+	},
+	{
+		"id":"bmd_metrics_file_flag",
+		"required":"no",
 		"subst_constructor":{
-			"vals":[
-				"bamsort",
-				"SO=coordinate",
-				"level=0",
-				"verbose=0",
-				"fixmate=1",
-				"adddupmarksupport=1",
-				{"subst":"bs_tmpfile_flag"}
-			],
-			"postproc":{"op":"pack", "pad":" "}
+			"vals":[ "M=", {"subst":"outdatadir"}, "/", {"subst":"rpt"}, {"subst":"phix_or_target"}, ".markdups_metrics.txt" ],
+			"postproc":{"op":"concat", "pad":""}
 		}
 	},
         {
@@ -90,48 +78,6 @@
 				".tmp"
 			],
 			"postproc":{"op":"concat", "pad":""}
-		}
-	},
-	{
-		"id":"bmd_metrics_file_flag",
-		"required":"no",
-		"subst_constructor":{
-			"vals":[
-				"M=",
-				{"subst":"outdatadir"},
-				"/",
-				{"subst":"rpt"},
-				{"subst":"phix_or_target"},
-				".markdups_metrics.txt"
-			],
-			"postproc":{"op":"concat", "pad":""}
-		}
-	},
-	{
-		"id":"bmd_resetdupflag",
-		"comment":"this option should only be used with bamstreamingmarkduplicates (not bammarkduplicates or bammarkduplicates2)",
-		"subst_constructor":{
-			"vals":[
-				"resetdupflag",
-				{"subst":"bmd_resetdupflag_val"}
-			],
-			"postproc":{"op":"concat", "pad":"="}
-		}
-	},
-	{"id":"bmd_cmd","required":"no","default":"bamstreamingmarkduplicates"},
-	{
-		"id":"bammarkduplicates",
-		"required":"yes",
-		"subst_constructor":{
-			"vals":[
-				{"subst":"bmd_cmd"},
-				"level=0",
-				"verbose=0",
-				{"subst":"bmd_tmpfile_flag"},
-				{"subst":"bmd_metrics_file_flag"},
-				{"subst":"bmd_resetdupflag"}
-			],
-			"postproc":{"op":"pack"}
 		}
 	},
 	{"id":"stats_filter__F0x900","required":"no","default":"0x900"},
@@ -408,19 +354,18 @@
 ],
 "nodes":[
 	{
-		"id":"bamsort_coord",
+		"id":"bamsormadup",
+		"comment":"bamsormadup handles sorting, marking duplicates, fixmates",
 		"type":"EXEC",
 		"use_STDIN": true,
 		"use_STDOUT": true,
-		"cmd":{"subst":"bamsort_coord"}
-	},
-	{
-		"id":"bammarkduplicates",
-		"comment":"default tool bamstreamingmarkduplicates must be from Biobambam >= 0.0.174",
-		"type":"EXEC",
-		"use_STDIN": true,
-		"use_STDOUT": true,
-		"cmd":{"subst":"bammarkduplicates"}
+		"cmd":[
+			"bamsormadup",
+			"level=0",
+			{"subst":"bsmd_threads_flag"},
+			{"subst":"bmd_metrics_file_flag"},
+			{"subst":"bs_tmpfile_flag"}
+		]
 	},
 	{
 		"id":"bmd_multiway",
@@ -566,8 +511,7 @@
 	}
 ],
 "edges":[
-	{ "id":"bamsort_to_bammarkduplicates", "from":"bamsort_coord", "to":"bammarkduplicates" },
-	{ "id":"bammarkduplicates_to_multiway", "from":"bammarkduplicates", "to":"bmd_multiway" },
+	{ "id":"bamsormadup_to_multiway", "from":"bamsormadup", "to":"bmd_multiway" },
 	{ "id":"bmdmw_to_scramble", "from":"bmd_multiway:__SCRAMBLE_OUT__", "to":"scramble" },
 	{ "id":"scramble_to_scramble_tee", "from":"scramble", "to":"scramble_tee" },
 	{ "id":"scramble_tee_to_md5", "from":"scramble_tee:__MD5_OUT__", "to":"scramble_md5" },
