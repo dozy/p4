@@ -90,9 +90,6 @@ my $flat_graph = flatten_tree($node_tree);
 
 if($absolute_program_paths) {
 	foreach my $node_with_cmd ( grep {$_->{'cmd'}} @{$flat_graph->{'nodes'}}) {
-
-		$node_with_cmd->{cmd} = finalise_cmd($node_with_cmd->{cmd});
-
 		my $cmd_ref = \$node_with_cmd->{'cmd'};
 		if(ref ${$cmd_ref} eq 'ARRAY') { $cmd_ref = \${${$cmd_ref}}[0]}
 		${$cmd_ref} =~ s/\A(\S+)/ abs_path( (-x $1 ? $1 : undef) || (which $1) || croak "cannot find program $1" )/e;
@@ -187,6 +184,10 @@ sub process_vtnode {
 	}
 	pop @{$globals->{vt_file_stack}};
 
+	# flatten any cmd arrays, removing undef values
+	for my $node_with_cmd ( grep {$_->{'cmd'}} @{$vtnode->{'nodes'}}) {
+		$node_with_cmd->{cmd} = finalise_cmd($node_with_cmd->{cmd});
+	}
 	return $vtnode;
 }
 
