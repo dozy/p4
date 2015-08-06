@@ -59,7 +59,7 @@ if($help) {
 @keys = split(/,/, join(',', @keys));
 @vals = split(/,/, join(',', @vals));
 
-my $subst_requests = initialise_subst_requests(\@keys, \@vals, \@nullkeys);
+my ($subst_requests, $subst_map_overrides) = initialise_subst_requests(\@keys, \@vals, \@nullkeys);
 
 $query_mode ||= 0;
 $verbosity_level = $VLMIN unless defined $verbosity_level;
@@ -81,9 +81,9 @@ else {
 }
 
 my $param_store;
-my $globals = { node_prefixes => { auto_node_prefix => 0, used_prefixes => {}}, vt_file_stack => [], processed_sp_files => {}, template_path => $template_path, };
+my $globals = { node_prefixes => { auto_node_prefix => 0, used_prefixes => {}}, vt_file_stack => [], vt_node_stack => [], processed_sp_files => {}, template_path => $template_path, };
 
-my $node_tree = process_vtnode(q[], $vtf_name, q[], $param_store, $subst_requests, $globals);    # recursively generate the vtnode tree
+my $node_tree = process_vtnode(q[], $vtf_name, q[], $param_store, $subst_requests, $subst_map_overrides, $globals);    # recursively generate the vtnode tree
 if(report_pv_ewi($node_tree, $logger)) { croak qq[Exiting after process_vtnode...\n]; }
 
 my $flat_graph = flatten_tree($node_tree);
@@ -116,6 +116,11 @@ print $out to_json($flat_graph);
 #  subst_requests - a list ref of key/value pairs, keys are subst_param [var]names, values
 #                    are string values or array refs of strings; supplied at run time or
 #                    via subst_map attributes in VTFILE nodes
+#  subst_map_overrides - a hash ref, keys are colon-separated node paths specifying
+#                        the place where the key/values stored in the keys should be
+#                        applied to override or supplement any parameter values added to
+#                        the initial local subst_request entry created for VTFILE node
+#                        expansion
 #  globals - auxiliary items used for error checking/reporting (and final flattening, e.g.
 #             node_prefix validation and generation for ensuring unique node ids in
 #             subgraphs)
@@ -132,7 +137,7 @@ print $out to_json($flat_graph);
 # Returns: root of tree of vtnodes (for later flattening)
 ##########################################################################################
 sub process_vtnode {
-	my ($vtnode_id, $vtf_name, $node_prefix, $param_store, $subst_requests, $globals) = @_;
+	my ($vtnode_id, $vtf_name, $node_prefix, $param_store, $subst_requests, $subst_map_overrides, $globals) = @_;
 
 	my $vtnode = {
 		id => $vtnode_id,
@@ -168,16 +173,25 @@ sub process_vtnode {
 	$vtnode->{cfg}->{nodes} = [ @nonvtf_nodes ];
 
 	push @{$globals->{vt_file_stack}}, $vtf_name;
+	push @{$globals->{vt_node_stack}}, $vtnode_id;
 	for my $vtf_node (@vtf_nodes) {
 
 		# both subst_requests and param_stores have local components
 		my $sr = $vtf_node->{subst_map};
 		$sr ||= {};
+
+		# now update with any "localised" subst_requests from the command-line (replace, not supplement)
+		my $local_env_key = join(q[:], @{$globals->{vt_node_stack}}) . q{:} . $vtf_node->{id};
+		$local_env_key = substr($local_env_key, 1); # remove initial :
+		if(my $smo = $subst_map_overrides->{$local_env_key}) {
+			@{$sr}{keys %{$smo}} = values %{$smo};
+		}
+
 		unshift @$subst_requests, $sr;
 		my $ps = { varnames => {}, };
 		unshift @$param_store, $ps;
 
-		my $vtc = process_vtnode($vtf_node->{id}, $vtf_node->{name}, $vtf_node->{node_prefix}, $param_store, $subst_requests, $globals);
+		my $vtc = process_vtnode($vtf_node->{id}, $vtf_node->{name}, $vtf_node->{node_prefix}, $param_store, $subst_requests, $subst_map_overrides, $globals);
 
 		shift @$param_store;
 		shift @$subst_requests;
@@ -186,6 +200,7 @@ sub process_vtnode {
 
 	}
 	pop @{$globals->{vt_file_stack}};
+	pop @{$globals->{vt_node_stack}};
 
 	return $vtnode;
 }
@@ -481,6 +496,13 @@ sub fetch_subst_value {
 		$param_entry = $new_param_entry;
 	}
 
+	for my $sr (@$subst_requests) {
+		if(exists $sr->{$param_name}) { # allow undef value
+			$param_entry->{_value} = $sr->{$param_name};
+			return $sr->{$param_name};
+		}
+	}
+
 	if(defined $param_entry->{_value}) {
 		return $param_entry->{_value};   # already evaluated, no need to do again
 	}
@@ -767,11 +789,15 @@ sub get_child_prefix {
 
 #####################################################################
 # initialise_subst_requests:
+#  record any parameter values set from the command line. A separate
+#  store is used for "localised" parameter setting (ones applied when
+#  subst_requests store for VTFILE expansion is set up)
 #  if a key is specified more than once, its value becomes a list ref
 #####################################################################
 sub initialise_subst_requests {
 	my ($keys, $vals, $nullkeys) = @_;
 	my %subst_requests = ();
+	my %subst_map_overrides = ();
 
 	if(@$keys != @$vals) {
 		croak q[Mismatch between keys and vals];
@@ -782,19 +808,49 @@ sub initialise_subst_requests {
 	}
 
 	for my $i (0..$#{$keys}) {
-		if(defined $subst_requests{$keys->[$i]}) {
-			if(ref $subst_requests{$keys->[$i]} ne q[ARRAY]) {
-				$subst_requests{$keys->[$i]} = [ $subst_requests{$keys->[$i]} ];
+		my ($locality, $param_name) = _parse_localised_param_name($keys->[$i]);
+		my $param_value = $vals->[$i];
+
+		if($locality) {
+			# put it in the subst_map_overrides
+			if(defined $subst_map_overrides{$locality}->{$param_name}) {
+				if(ref $subst_map_overrides{$locality}->{$param_name} ne q[ARRAY]) {
+					$subst_map_overrides{$locality}->{$param_name} = [ $subst_map_overrides{$locality}->{$param_name} ];
+				}
+
+				push @{$subst_map_overrides{$locality}->{$param_name}}, $param_value;
+			}
+			else {
+				$subst_map_overrides{$locality}->{$param_name} = $param_value;
+			}
+		}
+		elsif(defined $subst_requests{$param_name}) {
+			if(ref $subst_requests{$param_name} ne q[ARRAY]) {
+				$subst_requests{$param_name} = [ $subst_requests{$param_name} ];
 			}
 
-			push @{$subst_requests{$keys->[$i]}}, $vals->[$i];
+			push @{$subst_requests{$param_name}}, $param_value;
 		}
 		else {
-			$subst_requests{$keys->[$i]} = $vals->[$i];
+			$subst_requests{$param_name} = $param_value;
 		}
 	}
 
-	return [ \%subst_requests ];  # note: the return value is a ref to a list of hash refs
+	return ([ \%subst_requests ], \%subst_map_overrides);  # note: the return value is a ref to a list of hash refs
+}
+
+#########################################################
+# _parse_localised_param_name
+#  this should allow for escaping of the delimiter (TODO)
+#########################################################
+sub _parse_localised_param_name {
+	my ($full_param_name) = @_;
+
+	my @a = split /:/, $full_param_name;
+	my $param_name = pop @a;
+	my $locality = join q{:}, @a;
+
+	return ($locality, $param_name);
 }
 
 #############################################################################################
