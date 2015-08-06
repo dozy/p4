@@ -84,7 +84,7 @@ my $param_store;
 my $globals = { node_prefixes => { auto_node_prefix => 0, used_prefixes => {}}, vt_file_stack => [], processed_sp_files => {}, template_path => $template_path, };
 
 my $node_tree = process_vtnode(q[], $vtf_name, q[], $param_store, $subst_requests, $globals);    # recursively generate the vtnode tree
-if(report_pv_ewi($node_tree)) { croak qq[Exiting after process_vtnode...\n]; }
+if(report_pv_ewi($node_tree, $logger)) { croak qq[Exiting after process_vtnode...\n]; }
 
 my $flat_graph = flatten_tree($node_tree);
 
@@ -136,7 +136,7 @@ sub process_vtnode {
 		name => $vtf_name,
 		cfg => {},
 		children => [],
-		ewi => mkewi(q[PV - node:] . ($vtnode_id? $vtnode_id: q[TOP]) . q[ (] . ($vtf_name? $vtf_name: q[NONAME]) . q[)]) };
+		ewi => mkewi(q[node:] . ($vtnode_id? $vtnode_id: q[TOP]) . q[ (] . ($vtf_name? $vtf_name: q[NONAME]) . q[)]) };
 
 	unless(is_valid_name($vtf_name)) {
 		$vtnode->{ewi}->{additem}->($EWI_ERROR, 0, q[Missing or invalid name for VTFILE element id: ], $vtnode_id, q[ (], , join(q[->], @{$globals->{vt_file_stack}}), q[)]);
@@ -185,7 +185,7 @@ sub process_vtnode {
 	pop @{$globals->{vt_file_stack}};
 
 	# flatten any cmd arrays, removing undef values
-	for my $node_with_cmd ( grep {$_->{'cmd'}} @{$vtnode->{'nodes'}}) {
+	for my $node_with_cmd ( grep {$_->{'cmd'}} @{$vtnode->{cfg}->{'nodes'}}) {
 		$node_with_cmd->{cmd} = finalise_cmd($node_with_cmd->{cmd});
 	}
 	return $vtnode;
@@ -392,8 +392,8 @@ sub subst_walk {
 
 				$elem->{$k} = fetch_subst_value($param_name, $param_store, $subst_requests, $ewi);
 
-				unless(defined $elem->{$k}) {
-					$ewi->{additem}->($EWI_ERROR, 1, q[Failed to fetch subst value for parameter ], $param_name, q[ (key was ], $k, q[)]);
+				unless(defined $elem->{$k}) { # this has been changed to INFO. If ERROR is wanted, required attribute should be set so that fetch_subst_value() flags it
+					$ewi->{additem}->($EWI_INFO, 0, q[Failed to fetch subst value for parameter ], $param_name, q[ (key was ], $k, q[)]);
 				}
 
 				next;
@@ -423,8 +423,8 @@ sub subst_walk {
 					$elem->[$i] = $sval;
 				}
 
-				unless(defined $elem->[$i]) {
-					$ewi->{additem}->($EWI_ERROR, 1, q[Failed to fetch subst value for parameter ], $param_name, q[ (element index was ], $i, q[)],);
+				unless(defined $elem->[$i]) { # this has been changed to INFO. If ERROR is wanted, required attribute should be set so that fetch_subst_value() flags it
+					$ewi->{additem}->($EWI_INFO, 0, q[Failed to fetch subst value for parameter ], $param_name, q[ (element index was ], $i, q[)],);
 				}
 
 				next;
@@ -600,14 +600,14 @@ sub resolve_subst_array {
 }
 
 sub report_pv_ewi {
-	my ($tree_node) = @_; 
+	my ($tree_node, $logger) = @_; 
 	my $fatality = 0;
 
-	if($tree_node->{ewi}->{report}->(0)) { $fatality = 1; }
+	if($tree_node->{ewi}->{report}->(0, $logger)) { $fatality = 1; }
 
 	# do the same recursively for any children
 	for my $tn (@{$tree_node->{children}}) {
-		if($tn->{ewi}->{report}->(0)) { $fatality = 1; }
+		if($tn->{ewi}->{report}->(0, $logger)) { $fatality = 1; }
 	}
 
 	return $fatality; # should return some kind of error indicator, I think
@@ -961,7 +961,7 @@ sub mkewi {
 			my $label = join(":", @labels);
 			my $ms = join("", @ms);
 
-			my $full_ms = sprintf "(%s) - %s\n", $label, $ms;
+			my $full_ms = sprintf "(%s) - %s", $label, $ms;
 
 			push @list, { type => $type, subclass => $subclass, ms => $full_ms };
 
@@ -994,14 +994,15 @@ sub mkewi {
 			return;
 		},
 		report => sub {
-			my ($fatality_level) = @_;
+			my ($fatality_level, $logger) = @_;
 			my $ewi_retstat = 0;
 			my %ewi_type_names = ( $EWI_ERROR => q[Error], $EWI_WARNING => q[Warning], $EWI_INFO => q[Info], );
 
 			for my $ewi_item (@list) {
 				if($ewi_item->{type} == $EWI_ERROR and $ewi_item->{subclass} <= $fatality_level) { $ewi_retstat = 1; }
 
-				printf join("\t", ($ewi_type_names{$ewi_item->{type}}, $ewi_item->{subclass}, $ewi_item->{ms},)), "\n";
+				$logger->($VLMED, join("\t", ($ewi_type_names{$ewi_item->{type}}, $ewi_item->{subclass}, $ewi_item->{ms},)));
+#				print STDERR join("\t", ($ewi_type_names{$ewi_item->{type}}, $ewi_item->{subclass}, $ewi_item->{ms},));
 			}
 
 			return $ewi_retstat;
