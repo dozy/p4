@@ -59,7 +59,8 @@ if($help) {
 @keys = split(/,/, join(',', @keys));
 @vals = split(/,/, join(',', @vals));
 
-my ($subst_requests, $subst_map_overrides) = initialise_subst_requests(\@keys, \@vals, \@nullkeys);
+#WIP my ($subst_requests, $subst_map_overrides) = initialise_subst_requests(\@keys, \@vals, \@nullkeys);
+my $params = initialise_params(\@keys, \@vals, \@nullkeys);
 
 $query_mode ||= 0;
 $verbosity_level = $VLMIN unless defined $verbosity_level;
@@ -80,10 +81,11 @@ else {
 	$template_path = [];
 }
 
-my $param_store;
+# WIP my $param_store;
 my $globals = { node_prefixes => { auto_node_prefix => 0, used_prefixes => {}}, vt_file_stack => [], vt_node_stack => [], processed_sp_files => {}, template_path => $template_path, };
 
-my $node_tree = process_vtnode(q[], $vtf_name, q[], $param_store, $subst_requests, $subst_map_overrides, $globals);    # recursively generate the vtnode tree
+# WIP my $node_tree = process_vtnode(q[], $vtf_name, q[], $param_store, $subst_requests, $subst_map_overrides, $globals);    # recursively generate the vtnode tree
+my $node_tree = process_vtnode(q[], $vtf_name, q[], $params, $globals);    # recursively generate the vtnode tree
 if(report_pv_ewi($node_tree, $logger)) { croak qq[Exiting after process_vtnode...\n]; }
 
 my $flat_graph = flatten_tree($node_tree);
@@ -111,33 +113,35 @@ print $out to_json($flat_graph);
 #  vtf_name - name of the file to read for this vtfile
 #  node_prefix - if specified (note: zero-length string is "specified"), prefix all nodes
 #                  from this vtfile with this string; otherwise auto-generate prefix
-#  param_store - a stack of maps of variable names to their values or constructor;
+#  params - a hash ref containing keys:
+#     param_store - a stack of maps of variable names to their values or constructor;
 #                  supplies the values when subst directives are processed
-#  subst_requests - a list ref of key/value pairs, keys are subst_param [var]names, values
+#     assign - a list ref of key/value pairs, keys are subst_param [var]names, values
 #                    are string values or array refs of strings; supplied at run time or
 #                    via subst_map attributes in VTFILE nodes
-#  subst_map_overrides - a hash ref, keys are colon-separated node paths specifying
-#                        the place where the key/values stored in the keys should be
-#                        applied to override or supplement any parameter values added to
-#                        the initial local subst_request entry created for VTFILE node
-#                        expansion
-#  globals - auxiliary items used for error checking/reporting (and final flattening, e.g.
-#             node_prefix validation and generation for ensuring unique node ids in
-#             subgraphs)
+#     assign_local - a hash ref, keys are colon-separated node paths (node id values)
+#                        specifying the place where the key/values stored in the keys
+#                        should be applied to override or supplement any parameter values
+#                        added to the initial local subst_request entry created for
+#                        VTFILE node expansion
+#  globals - auxiliary items used for error checking/reporting (and final flattening,
+#             e.g. node_prefix validation and generation for ensuring unique node ids
+#             in subgraphs)
 #
 # Description:
 #   1. read cfg for given vtf_name
-#   2. process local subst_param section (if any), expanding SPFILE nodes and updating
-#       param_store
+#   2. create and process local subst_param section (if any), expanding SPFILE nodes
+#       and updating param_store
 #   3. process subst directives (just nodes and edges)
 #   4. process nodes, expanding elements of type VTFILE (note: there will be param_store
-#       and subst_request lists, containing as many entries as the current depth of VTFILE
-#       nesting)
+#       and subst_request lists, containing as many entries as the current depth of
+#       VTFILE nesting)
 #
 # Returns: root of tree of vtnodes (for later flattening)
 ##########################################################################################
 sub process_vtnode {
-	my ($vtnode_id, $vtf_name, $node_prefix, $param_store, $subst_requests, $subst_map_overrides, $globals) = @_;
+# WIP	my ($vtnode_id, $vtf_name, $node_prefix, $param_store, $subst_requests, $subst_map_overrides, $globals) = @_;
+	my ($vtnode_id, $vtf_name, $node_prefix, $params, $globals) = @_;
 
 	my $vtnode = {
 		id => $vtnode_id,
@@ -160,9 +164,11 @@ sub process_vtnode {
 
 	$vtnode->{node_prefix} = get_node_prefix($node_prefix, $globals->{node_prefixes});
 	$vtnode->{cfg} = read_vtf_version_check($vtf_name, $MIN_TEMPLATE_VERSION, $globals->{template_path}, );
-	$param_store = process_subst_params($param_store, $subst_requests, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals, $vtnode->{ewi});
+# WIP	$param_store = process_subst_params($param_store, $subst_requests, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals, $vtnode->{ewi});
+	$param_store = process_subst_params($params, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals, $vtnode->{ewi});
 
-	apply_subst($vtnode->{cfg}, $param_store, $subst_requests, $vtnode->{ewi});   # process any subst directives in cfg (just nodes and edges)
+# WIP	apply_subst($vtnode->{cfg}, $param_store, $subst_requests, $vtnode->{ewi});   # process any subst directives in cfg (just nodes and edges)
+	apply_subst($vtnode->{cfg}, $params, $vtnode->{ewi});   # process any subst directives in cfg (just nodes and edges)
 
 	my @vtf_nodes = ();
 	my @nonvtf_nodes = ();
@@ -183,18 +189,24 @@ sub process_vtnode {
 		# now update with any "localised" subst_requests from the command-line (replace, not supplement)
 		my $local_env_key = join(q[:], @{$globals->{vt_node_stack}}) . q{:} . $vtf_node->{id};
 		$local_env_key = substr($local_env_key, 1); # remove initial :
-		if(my $smo = $subst_map_overrides->{$local_env_key}) {
+# WIP		if(my $smo = $subst_map_overrides->{$local_env_key}) {
+		if(my $smo = $params->{assign_local}->{$local_env_key}) {
 			@{$sr}{keys %{$smo}} = values %{$smo};
 		}
 
-		unshift @$subst_requests, $sr;
+# WIP		unshift @$subst_requests, $sr;
+		unshift @{$params->{assign}}, $sr;
 		my $ps = { varnames => {}, };
-		unshift @$param_store, $ps;
+# WIP		unshift @$param_store, $ps;
+		unshift @{$params->{param_store}}, $ps;
 
-		my $vtc = process_vtnode($vtf_node->{id}, $vtf_node->{name}, $vtf_node->{node_prefix}, $param_store, $subst_requests, $subst_map_overrides, $globals);
+# WIP		my $vtc = process_vtnode($vtf_node->{id}, $vtf_node->{name}, $vtf_node->{node_prefix}, $param_store, $subst_requests, $subst_map_overrides, $globals);
+		my $vtc = process_vtnode($vtf_node->{id}, $vtf_node->{name}, $vtf_node->{node_prefix}, $params, $globals);
 
-		shift @$param_store;
-		shift @$subst_requests;
+# WIP		shift @$param_store;
+# WIP		shift @$subst_requests;
+		shift @{$params->{param_store}};
+		shift @{$params->{assign}};
 
 		push @{$vtnode->{children}}, $vtc;
 
@@ -232,12 +244,23 @@ sub get_node_prefix {
 
 #######################################################################################
 # process_subst_params:
-#  param_store - a stack of maps of variable names to their values or constructor;
+#  params - a hash ref containing keys:
+#     param_store - a stack of maps of variable names to their values or constructor;
 #                  supplies the values when subst directives are processed
-#  subst_requests - a stack of key/value pairs. Keys are subst_param varnames,
-#                    values are string values; supplied at run time or via subst_map
-#                    attributes in VTFILE nodes; used here to expand subst directives
-#                    that appear in subst_param entries
+#     assign - a list ref of key/value pairs, keys are subst_param [var]names, values
+#                    are string values or array refs of strings; supplied at run time or
+#                    via subst_map attributes in VTFILE nodes
+#     assign_local - a hash ref, keys are colon-separated node paths (node id values)
+#                        specifying the place where the key/values stored in the keys
+#                        should be applied to override or supplement any parameter values
+#                        added to the initial local subst_request entry created for
+#                        VTFILE node expansion
+# WIP  param_store - a stack of maps of variable names to their values or constructor;
+# WIP                  supplies the values when subst directives are processed
+# WIP  subst_requests - a stack of key/value pairs. Keys are subst_param varnames,
+# WIP                    values are string values; supplied at run time or via subst_map
+# WIP                    attributes in VTFILE nodes; used here to expand subst directives
+# WIP                    that appear in subst_param entries
 #  unprocessed_subst_params - the list of subst_param entries to process; either of
 #                    type PARAM (describes how to retrieve/construct the value for the
 #                    specified varname) or SPFILE (specifies a file containing
@@ -246,7 +269,7 @@ sub get_node_prefix {
 #                    warning/error reporting
 #  globals - used here to prevent multiple processing of SPFILE nodes and to pass the
 #                  value of template_path
-#  ewi - Error/Warning/Info message handler
+#  ewi - record Error/Warning/Info messages here
 #
 # Description:
 #  process a subst_param section, adding any varnames declared in it to the "local"
@@ -263,7 +286,8 @@ sub get_node_prefix {
 #  more sophisticated structure for elements on this stack to improve error reporting
 #######################################################################################
 sub process_subst_params {
-	my ($param_store, $subst_requests, $unprocessed_subst_params, $sp_file_stack, $globals, $ewi) = @_;
+# WIP	my ($param_store, $subst_requests, $unprocessed_subst_params, $sp_file_stack, $globals, $ewi) = @_;
+	my ($params, $unprocessed_subst_params, $sp_file_stack, $globals, $ewi) = @_;
 	my @spfile_node_queue = ();
 
 	$param_store ||= [ { varnames => {}, } ];
@@ -275,7 +299,7 @@ sub process_subst_params {
 		my $sptype = $sp->{type}; 
 		$sptype ||= q[PARAM];
 
-		if($sptype eq q[SPFILE]) {	# process recursively
+		if($sptype eq q[SPFILE]) { # process recursively
 			# SPFILE entries will be processed after all PARAM-type entries have been processed (for consistency in redeclaration behaviour)
 			push @spfile_node_queue, $sp;
 		}
@@ -311,7 +335,8 @@ sub process_subst_params {
 	################################
 	for my $spfile (@spfile_node_queue) {
 		my $ewi = mkewi(q[SPF]);
-		subst_walk($spfile, $param_store, $subst_requests, [], $ewi);
+# WIP		subst_walk($spfile, $param_store, $subst_requests, [], $ewi);
+		subst_walk($spfile, $params, [], $ewi);
 #		if($ewi->{report}->()) { croak q[Exiting after SPFILE processing...]; };
 		my $spname = is_valid_name($spfile->{name});
 		if(not $spname) {
@@ -327,7 +352,8 @@ sub process_subst_params {
 			#  files must contain (new-style) subst_param sections to be useful
 			if(defined $cfg->{subst_params}) {
 				push @$sp_file_stack, $spname;
-				process_subst_params($param_store, $subst_requests, $cfg->{subst_params}, $sp_file_stack, $globals, $ewi);
+# WIP				process_subst_params($param_store, $subst_requests, $cfg->{subst_params}, $sp_file_stack, $globals, $ewi);
+				process_subst_params($params, $cfg->{subst_params}, $sp_file_stack, $globals, $ewi);
 				pop @$sp_file_stack;
 			}
 		}
@@ -389,7 +415,8 @@ sub apply_subst {
 #   lists for the desired key/value pair
 ##############################################################################################################
 sub subst_walk {
-	my ($elem, $param_store, $subst_requests, $labels, $ewi) = @_;
+# WIP	my ($elem, $param_store, $subst_requests, $labels, $ewi) = @_;
+	my ($elem, $params, $labels, $ewi) = @_;
 
 	my $r = ref $elem;
 	if(!$r) {
@@ -404,7 +431,8 @@ sub subst_walk {
 					$ewi->{additem}->($EWI_ERROR, 0, q[value for a subst directive must be a param (not a reference), key for subst is: ], $k);
 				}
 
-				$elem->{$k} = fetch_subst_value($param_name, $param_store, $subst_requests, $ewi);
+# WIP				$elem->{$k} = fetch_subst_value($param_name, $param_store, $subst_requests, $ewi);
+				$elem->{$k} = fetch_subst_value($param_name, $params, $ewi);
 
 				unless(defined $elem->{$k}) { # this has been changed to INFO. If ERROR is wanted, required attribute should be set so that fetch_subst_value() flags it
 					$ewi->{additem}->($EWI_INFO, 0, q[Failed to fetch subst value for parameter ], $param_name, q[ (key was ], $k, q[)]);
@@ -429,7 +457,8 @@ sub subst_walk {
 					$ewi->{additem}->($EWI_ERROR, 0, q[value for a subst directive must be a param name (not a reference), index for subst is: ], $i);
 				}
 
-				my $sval = fetch_subst_value($param_name, $param_store, $subst_requests, $ewi);
+# WIP				my $sval = fetch_subst_value($param_name, $param_store, $subst_requests, $ewi);
+				my $sval = fetch_subst_value($param_name, $params, $ewi);
 				if(ref $sval eq q[ARRAY]) {
 					splice @$elem, $i, 1, @$sval;
 				}
@@ -466,22 +495,38 @@ sub subst_walk {
 #  a value for the given param_name. The _value attribute of a
 #  param_entry caches successfully resolved values.
 #
-#   1. Search the param_store for an entry for this param_name.
-#   2. If there isn't a param_store entry, add [an unset] one.
-#   3. If the param_entry _value attribute is set, return that.
-#   4. Search subst_requests for a value for this param_name. If
-#       one is found, return it.
-#   5. Try evaluating the param_entry. If it resolves, return that
-#       value.
-#   6. If a default value value was specified in the param_entry,
+#   1. If the value has already been resolved in the local
+#       param_store, return that value.
+#   2. Search the param_store stack for an entry for this
+#       param_name, working outwards from the local level0
+#       param_store
+#   3. if only a non-local entry is found, copy it to the local
+#       param_store; if no entry is found, create one in the
+#       local param_store
+#   4. search the assign/subst_requests stack (from local outward)
+#       for user-specified value assignment - these will override
+#       any other assignments (e.g. defaults, subst_maps or
+#       subst_constructors specified in the template). If a value
+#       is found, return it.
+#   5. If the parameter has a subst_constructor attribute, use
+#       that to construct the value and return it.
+#   6. If a default value was specified in the param_entry,
 #       return that.
 #   7. If the required attribute of the param_entry is true,
-#       it is a fatal error; otherwise return undef
+#       record it as an error; return undef for caller to handle
 ##################################################################
 sub fetch_subst_value {
-	my ($param_name, $param_store, $subst_requests, $ewi) = @_;
+# WIP	my ($param_name, $param_store, $subst_requests, $ewi) = @_;
+	my ($param_name, $params, $ewi) = @_;
 	my $param_entry;
 	my $retval;
+
+	my $param_store = $params->{param_store};
+	my $subst_requests = $params->{assign};
+
+	if(defined $param_store->[0]->{varnames}->{$param_name}->{_value}) {
+		return $param_store->[0]->{varnames}->{$param_name}->{_value};
+	}
 
 	for my $ps (@$param_store) {
 		$param_entry = $ps->{varnames}->{$param_name};
@@ -496,6 +541,8 @@ sub fetch_subst_value {
 		$param_entry = $new_param_entry;
 	}
 
+	# at this point, we have either found or created the param_entry in the local param_store
+
 	for my $sr (@$subst_requests) {
 		if(exists $sr->{$param_name}) { # allow undef value
 			$param_entry->{_value} = $sr->{$param_name};
@@ -505,13 +552,6 @@ sub fetch_subst_value {
 
 	if(defined $param_entry->{_value}) {
 		return $param_entry->{_value};   # already evaluated, no need to do again
-	}
-
-	for my $sr (@$subst_requests) {
-		if(exists $sr->{$param_name}) { # allow undef value
-			$param_entry->{_value} = $sr->{$param_name};
-			return $sr->{$param_name};
-		}
 	}
 
 	if($param_entry->{subst_constructor}) {
@@ -526,7 +566,8 @@ sub fetch_subst_value {
 
 		for my $i (reverse (0..$#$vals)) {
 			if(ref $vals->[$i] eq q[HASH] and $vals->[$i]->{subst}) {
-				$vals->[$i] = fetch_subst_value($vals->[$i]->{subst}, $param_store, $subst_requests, $ewi);
+# WIP				$vals->[$i] = fetch_subst_value($vals->[$i]->{subst}, $param_store, $subst_requests, $ewi);
+				$vals->[$i] = fetch_subst_value($vals->[$i]->{subst}, $params, $ewi);
 				if(ref $vals->[$i] eq q[ARRAY]) {
 					splice(@$vals, $i, 1, (@{$vals->[$i]}));
 				}
@@ -785,6 +826,62 @@ sub get_child_prefix {
 	my $child = (grep { $edge_to =~ /^$_->{id}:?(.*)$/} @$children)[0];
 
 	return $child? $child->{node_prefix}: q[];
+}
+
+######################################################################
+# WIP
+# initialise_params:
+#  Record any parameter values set from the command line. A separate
+#  store is used for "localised" parameter setting (ones applied when
+#  subst_requests store for VTFILE expansion is set up).
+#  If a key is specified more than once, its value becomes a list ref.
+#  an empty initial param_store is added.
+######################################################################
+sub initialise_params {
+	my ($keys, $vals, $nullkeys) = @_;
+	my %subst_requests = ();
+	my %subst_map_overrides = ();
+
+	if(@$keys != @$vals) {
+		croak q[Mismatch between keys and vals];
+	}
+
+	for my $nullkey (@$nullkeys) {
+		$subst_requests{$nullkey} = undef;
+	}
+
+	for my $i (0..$#{$keys}) {
+		my ($locality, $param_name) = _parse_localised_param_name($keys->[$i]);
+		my $param_value = $vals->[$i];
+
+		if($locality) {
+			# put it in the subst_map_overrides
+			if(defined $subst_map_overrides{$locality}->{$param_name}) {
+				if(ref $subst_map_overrides{$locality}->{$param_name} ne q[ARRAY]) {
+					$subst_map_overrides{$locality}->{$param_name} = [ $subst_map_overrides{$locality}->{$param_name} ];
+				}
+
+				push @{$subst_map_overrides{$locality}->{$param_name}}, $param_value;
+			}
+			else {
+				$subst_map_overrides{$locality}->{$param_name} = $param_value;
+			}
+		}
+		elsif(defined $subst_requests{$param_name}) {
+			if(ref $subst_requests{$param_name} ne q[ARRAY]) {
+				$subst_requests{$param_name} = [ $subst_requests{$param_name} ];
+			}
+
+			push @{$subst_requests{$param_name}}, $param_value;
+		}
+		else {
+			$subst_requests{$param_name} = $param_value;
+		}
+	}
+
+# WIP	return ([ \%subst_requests ], \%subst_map_overrides);  # note: the return value is a ref to a list of hash refs
+
+	return { param_store =>  [], assign => [ \%subst_requests ], assign_local => \%subst_map_overrides, };
 }
 
 #####################################################################
