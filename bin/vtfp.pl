@@ -59,7 +59,6 @@ if($help) {
 @keys = split(/,/, join(',', @keys));
 @vals = split(/,/, join(',', @vals));
 
-#WIP my ($subst_requests, $subst_map_overrides) = initialise_subst_requests(\@keys, \@vals, \@nullkeys);
 my $params = initialise_params(\@keys, \@vals, \@nullkeys);
 
 $query_mode ||= 0;
@@ -81,10 +80,8 @@ else {
 	$template_path = [];
 }
 
-# WIP my $param_store;
 my $globals = { node_prefixes => { auto_node_prefix => 0, used_prefixes => {}}, vt_file_stack => [], vt_node_stack => [], processed_sp_files => {}, template_path => $template_path, };
 
-# WIP my $node_tree = process_vtnode(q[], $vtf_name, q[], $param_store, $subst_requests, $subst_map_overrides, $globals);    # recursively generate the vtnode tree
 my $node_tree = process_vtnode(q[], $vtf_name, q[], $params, $globals);    # recursively generate the vtnode tree
 if(report_pv_ewi($node_tree, $logger)) { croak qq[Exiting after process_vtnode...\n]; }
 
@@ -148,7 +145,7 @@ sub process_vtnode {
 		name => $vtf_name,
 		cfg => {},
 		children => [],
-		ewi => mkewi(q[node:] . ($vtnode_id? $vtnode_id: q[TOP]) . q[ (] . ($vtf_name? $vtf_name: q[NONAME]) . q[)]) };
+		ewi => mkewi(q[node:] . ($vtnode_id? $vtnode_id: q[TOP]) . q[ (name: ] . ($vtf_name? $vtf_name: q[unspec]) . q[)]) };
 
 	unless(is_valid_name($vtf_name)) {
 		$vtnode->{ewi}->{additem}->($EWI_ERROR, 0, q[Missing or invalid name for VTFILE element id: ], $vtnode_id, q[ (], , join(q[->], @{$globals->{vt_file_stack}}), q[)]);
@@ -165,7 +162,7 @@ sub process_vtnode {
 	$vtnode->{node_prefix} = get_node_prefix($node_prefix, $globals->{node_prefixes});
 	$vtnode->{cfg} = read_vtf_version_check($vtf_name, $MIN_TEMPLATE_VERSION, $globals->{template_path}, );
 # WIP	$param_store = process_subst_params($param_store, $subst_requests, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals, $vtnode->{ewi});
-	$param_store = process_subst_params($params, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals, $vtnode->{ewi});
+	$params = process_subst_params($params, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals, $vtnode->{ewi});
 
 # WIP	apply_subst($vtnode->{cfg}, $param_store, $subst_requests, $vtnode->{ewi});   # process any subst directives in cfg (just nodes and edges)
 	apply_subst($vtnode->{cfg}, $params, $vtnode->{ewi});   # process any subst directives in cfg (just nodes and edges)
@@ -290,7 +287,8 @@ sub process_subst_params {
 	my ($params, $unprocessed_subst_params, $sp_file_stack, $globals, $ewi) = @_;
 	my @spfile_node_queue = ();
 
-	$param_store ||= [ { varnames => {}, } ];
+	my $param_store = $params->{param_store};
+# WIP	$param_store ||= [ { varnames => {}, } ];
 
 	for my $i (0..$#{$unprocessed_subst_params}) {
 
@@ -362,7 +360,8 @@ sub process_subst_params {
 		}
 	}
 
-	return $param_store;
+# WIP	return $param_store;
+	return $params;
 }
 
 ##########################################################################
@@ -398,11 +397,13 @@ sub in_param_store {
 #  replace subst directives with values
 #######################################
 sub apply_subst {
-	my ($cfg, $param_store, $subst_requests, $ewi) = @_;   # process any subst directives in cfg (just nodes and edges?)
+# WIP	my ($cfg, $param_store, $subst_requests, $ewi) = @_;   # process any subst directives in cfg (just nodes and edges?)
+	my ($cfg, $params, $ewi) = @_;   # process any subst directives in cfg (just nodes and edges?)
 
 	for my $elem (@{$cfg->{nodes}}, @{$cfg->{edges}}) {
-		$ewi->{addlabel}->(q{AS [id:} . $elem->{id} . q{]});
-		subst_walk($elem, $param_store, $subst_requests, [], $ewi);
+		$ewi->{addlabel}->(q{assigning to id:[} . $elem->{id} . q{]});
+# WIP		subst_walk($elem, $param_store, $subst_requests, [], $ewi);
+		subst_walk($elem, $params, [], $ewi);
 		$ewi->{removelabel}->();
 	}
 
@@ -435,7 +436,7 @@ sub subst_walk {
 				$elem->{$k} = fetch_subst_value($param_name, $params, $ewi);
 
 				unless(defined $elem->{$k}) { # this has been changed to INFO. If ERROR is wanted, required attribute should be set so that fetch_subst_value() flags it
-					$ewi->{additem}->($EWI_INFO, 0, q[Failed to fetch subst value for parameter ], $param_name, q[ (key was ], $k, q[)]);
+					$ewi->{additem}->($EWI_INFO, 1, q[Failed to fetch subst value for parameter ], $param_name, q[ (key was ], $k, q[)]);
 				}
 
 				next;
@@ -443,7 +444,8 @@ sub subst_walk {
 
 			if(ref $elem->{$k}) {
 				push @$labels, $k;
-				subst_walk($elem->{$k}, $param_store, $subst_requests, $labels, $ewi);
+# WIP				subst_walk($elem->{$k}, $param_store, $subst_requests, $labels, $ewi);
+				subst_walk($elem->{$k}, $params, $labels, $ewi);
 				pop @$labels;
 			}
 		}
@@ -467,7 +469,7 @@ sub subst_walk {
 				}
 
 				unless(defined $elem->[$i]) { # this has been changed to INFO. If ERROR is wanted, required attribute should be set so that fetch_subst_value() flags it
-					$ewi->{additem}->($EWI_INFO, 0, q[Failed to fetch subst value for parameter ], $param_name, q[ (element index was ], $i, q[)],);
+					$ewi->{additem}->($EWI_INFO, 1, q[Failed to fetch subst value for parameter ], $param_name, q[ (element index was ], $i, q[)],);
 				}
 
 				next;
@@ -475,7 +477,8 @@ sub subst_walk {
 
 			if(ref $elem->[$i]) {
 				push @$labels, sprintf(q[ArrayElem%03d], $i);
-				subst_walk($elem->[$i], $param_store, $subst_requests, $labels, $ewi);
+# WIP				subst_walk($elem->[$i], $param_store, $subst_requests, $labels, $ewi);
+				subst_walk($elem->[$i], $params, $labels, $ewi);
 				pop @$labels;
 			}
 		}
@@ -516,10 +519,14 @@ sub subst_walk {
 #       record it as an error; return undef for caller to handle
 ##################################################################
 sub fetch_subst_value {
-# WIP	my ($param_name, $param_store, $subst_requests, $ewi) = @_;
-	my ($param_name, $params, $ewi) = @_;
+	my ($param_name, $params, $ewi, $irp) = @_;
 	my $param_entry;
 	my $retval;
+
+	if(defined $irp and any { $_ eq $param_name} @{$irp}) { # infinite recursion prevention
+		$ewi->{additem}->($EWI_ERROR, 0, q[infinite recursion detected resolving parameter ], $param_name, q[ (], join(q/=>/, (@{$irp}, $param_name)), q[)]);
+		return;
+	}
 
 	my $param_store = $params->{param_store};
 	my $subst_requests = $params->{assign};
@@ -530,7 +537,7 @@ sub fetch_subst_value {
 
 	for my $ps (@$param_store) {
 		$param_entry = $ps->{varnames}->{$param_name};
-		if($param_entry) { last; }
+		if(defined $param_entry->{id} and $param_entry->{id} eq $param_name) { last; }
 	}
 
 	if(not defined $param_store->[0]->{varnames}->{$param_name}) {	# create a "writeable" param_store entry at local level
@@ -541,7 +548,8 @@ sub fetch_subst_value {
 		$param_entry = $new_param_entry;
 	}
 
-	# at this point, we have either found or created the param_entry in the local param_store
+	# at this point, we have either found or created the param_entry in the local param_store. (We don't want to write to
+	#  a higher-level param_store entry)
 
 	for my $sr (@$subst_requests) {
 		if(exists $sr->{$param_name}) { # allow undef value
@@ -566,7 +574,6 @@ sub fetch_subst_value {
 
 		for my $i (reverse (0..$#$vals)) {
 			if(ref $vals->[$i] eq q[HASH] and $vals->[$i]->{subst}) {
-# WIP				$vals->[$i] = fetch_subst_value($vals->[$i]->{subst}, $param_store, $subst_requests, $ewi);
 				$vals->[$i] = fetch_subst_value($vals->[$i]->{subst}, $params, $ewi);
 				if(ref $vals->[$i] eq q[ARRAY]) {
 					splice(@$vals, $i, 1, (@{$vals->[$i]}));
@@ -587,8 +594,15 @@ sub fetch_subst_value {
 		}
 	}
 	elsif(defined $param_entry->{default}) {
-		$param_entry->{_value} = $param_entry->{default}; # be careful here - don't set _value for a higher-level param_store
-		return $param_entry->{default};
+		if(ref $param_entry->{default} and $param_entry->{default}->{subst}) {
+			$irp ||= [];
+			push @{$irp}, $param_name;
+			$param_entry->{_value} = fetch_subst_value($param_entry->{default}->{subst}, $params, $ewi, $irp);
+		}
+		else {
+			$param_entry->{_value} = $param_entry->{default};
+		}
+		return $param_entry->{_value};
 	}
 	else {
 		# caller should decide if undef is allowed, unless required is true
@@ -597,7 +611,7 @@ sub fetch_subst_value {
 		return;
 	}
 
-	$param_entry->{_value} = $retval; # be careful here - don't set _value for a higher-level param_store
+	$param_entry->{_value} = $retval;
 
 	return $retval;
 }
