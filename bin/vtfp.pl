@@ -20,6 +20,7 @@ use Cwd qw(abs_path);
 use File::Slurp;
 use JSON;
 use Storable 'dclone';
+use Hash::Merge qw( merge );
 
 our $VERSION = '0';
 
@@ -41,15 +42,17 @@ my %opts;
 my $help;
 my $strict_checks;
 my $outname;
+my $export_param_vals; # file to export params_vals to
 my $template_path;
 my $logfile;
 my $verbosity_level;
 my $query_mode;
 my $absolute_program_paths=1;
+my @param_vals_fns = (); # a list of input file names containing JSON-formatted params_vals data
 my @keys = ();
 my @vals = ();
 my @nullkeys = ();
-GetOptions('help' => \$help, 'strict_checks!' => \$strict_checks, 'verbosity_level=i' => \$verbosity_level, 'template_path=s' => \$template_path, 'logfile=s' => \$logfile, 'outname:s' => \$outname, 'query_mode!' => \$query_mode, 'keys=s' => \@keys, 'values|vals=s' => \@vals, 'nullkeys=s' => \@nullkeys, 'absolute_program_paths!' => \$absolute_program_paths);
+GetOptions('help' => \$help, 'strict_checks!' => \$strict_checks, 'verbosity_level=i' => \$verbosity_level, 'template_path=s' => \$template_path, 'logfile=s' => \$logfile, 'outname:s' => \$outname, 'query_mode!' => \$query_mode, 'param_vals=s' => \@param_vals_fns, 'keys=s' => \@keys, 'values|vals=s' => \@vals, 'nullkeys=s' => \@nullkeys, 'export_param_vals:s' => \$export_param_vals, 'absolute_program_paths!' => \$absolute_program_paths);
 
 if($help) {
 	croak q[Usage: ], $progname, q{ [-h] [-q] [-s] [-l <log_file>] [-o <output_config_name>] [-v <verbose_level>] [-keys <key> -vals <val> ...]  <viv_template>};
@@ -58,8 +61,17 @@ if($help) {
 # allow multiple options to be separated by commas
 @keys = split(/,/, join(',', @keys));
 @vals = split(/,/, join(',', @vals));
+@param_vals_fns = split(/,/, join(',', @param_vals_fns));
 
-my $params = initialise_params(\@keys, \@vals, \@nullkeys);
+my $params = initialise_params(\@keys, \@vals, \@nullkeys, \@param_vals_fns);
+
+if($export_param_vals) {
+	open my $epv, ">$export_param_vals" or croak "Failed to open $export_param_vals for export of param_vals";
+	print $epv to_json($params);
+	close $epv;
+
+	exit;
+}
 
 $query_mode ||= 0;
 $verbosity_level = $VLMIN unless defined $verbosity_level;
@@ -843,7 +855,6 @@ sub get_child_prefix {
 }
 
 ######################################################################
-# WIP
 # initialise_params:
 #  Record any parameter values set from the command line. A separate
 #  store is used for "localised" parameter setting (ones applied when
@@ -852,103 +863,225 @@ sub get_child_prefix {
 #  an empty initial param_store is added.
 ######################################################################
 sub initialise_params {
+	my ($keys, $vals, $nullkeys, $param_vals_fns) = @_;
+
+	my $pv = {};
+#	my $subst_requests = {};
+#	my $subst_map_overrides = {};
+
+#	if(@$keys != @$vals) {
+#		croak q[Mismatch between keys and vals];
+#	}
+#
+#	for my $nullkey (@$nullkeys) {
+#		$subst_requests->{$nullkey} = undef;
+#	}
+
+	$pv = construct_pv($keys, $vals, $nullkeys);
+
+#	if(@{$keys}) {
+#		for my $i (0..$#{$keys}) {
+#			my ($locality, $param_name) = _parse_localised_param_name($keys->[$i]);
+#			my $param_value = $vals->[$i];
+#
+#			if($locality) {
+#				# put it in the subst_map_overrides
+#				if(defined $subst_map_overrides->{$locality}->{$param_name}) {
+#					if(ref $subst_map_overrides->{$locality}->{$param_name} ne q[ARRAY]) {
+#						$subst_map_overrides->{$locality}->{$param_name} = [ $subst_map_overrides->{$locality}->{$param_name} ];
+#					}
+#
+#					push @{$subst_map_overrides->{$locality}->{$param_name}}, $param_value;
+#				}
+#				else {
+#					$subst_map_overrides->{$locality}->{$param_name} = $param_value;
+#				}
+#			}
+#			elsif(defined $subst_requests->{$param_name}) {
+#				if(ref $subst_requests->{$param_name} ne q[ARRAY]) {
+#					$subst_requests->{$param_name} = [ $subst_requests->{$param_name} ];
+#				}
+#
+#				push @{$subst_requests->{$param_name}}, $param_value;
+#			}
+#			else {
+#				$subst_requests->{$param_name} = $param_value;
+#			}
+#		}
+#		$pvs = [ { param_store =>  [], assign => [ $subst_requests ], assign_local => $subst_map_overrides, } ];
+#	}
+
+	return combine_pvs($param_vals_fns, $pv);
+}
+
+sub construct_pv {
 	my ($keys, $vals, $nullkeys) = @_;
-	my %subst_requests = ();
-	my %subst_map_overrides = ();
+	my $pv;
+	my $subst_requests = {};
+	my $subst_map_overrides = {};
 
 	if(@$keys != @$vals) {
 		croak q[Mismatch between keys and vals];
 	}
 
 	for my $nullkey (@$nullkeys) {
-		$subst_requests{$nullkey} = undef;
+		$subst_requests->{$nullkey} = undef;
 	}
 
-	for my $i (0..$#{$keys}) {
-		my ($locality, $param_name) = _parse_localised_param_name($keys->[$i]);
-		my $param_value = $vals->[$i];
+	if(@{$keys}) {
+		for my $i (0..$#{$keys}) {
+			my ($locality, $param_name) = _parse_localised_param_name($keys->[$i]);
+			my $param_value = $vals->[$i];
 
-		if($locality) {
-			# put it in the subst_map_overrides
-			if(defined $subst_map_overrides{$locality}->{$param_name}) {
-				if(ref $subst_map_overrides{$locality}->{$param_name} ne q[ARRAY]) {
-					$subst_map_overrides{$locality}->{$param_name} = [ $subst_map_overrides{$locality}->{$param_name} ];
+			if($locality) {
+				# put it in the subst_map_overrides
+				if(defined $subst_map_overrides->{$locality}->{$param_name}) {
+					if(ref $subst_map_overrides->{$locality}->{$param_name} ne q[ARRAY]) {
+						$subst_map_overrides->{$locality}->{$param_name} = [ $subst_map_overrides->{$locality}->{$param_name} ];
+					}
+
+					push @{$subst_map_overrides->{$locality}->{$param_name}}, $param_value;
+				}
+				else {
+					$subst_map_overrides->{$locality}->{$param_name} = $param_value;
+				}
+			}
+			elsif(defined $subst_requests->{$param_name}) {
+				if(ref $subst_requests->{$param_name} ne q[ARRAY]) {
+					$subst_requests->{$param_name} = [ $subst_requests->{$param_name} ];
 				}
 
-				push @{$subst_map_overrides{$locality}->{$param_name}}, $param_value;
+				push @{$subst_requests->{$param_name}}, $param_value;
 			}
 			else {
-				$subst_map_overrides{$locality}->{$param_name} = $param_value;
+				$subst_requests->{$param_name} = $param_value;
 			}
 		}
-		elsif(defined $subst_requests{$param_name}) {
-			if(ref $subst_requests{$param_name} ne q[ARRAY]) {
-				$subst_requests{$param_name} = [ $subst_requests{$param_name} ];
-			}
 
-			push @{$subst_requests{$param_name}}, $param_value;
-		}
-		else {
-			$subst_requests{$param_name} = $param_value;
-		}
+		$pv = { param_store =>  [], assign => [ $subst_requests ], assign_local => $subst_map_overrides, };
 	}
 
-# WIP	return ([ \%subst_requests ], \%subst_map_overrides);  # note: the return value is a ref to a list of hash refs
-
-	return { param_store =>  [], assign => [ \%subst_requests ], assign_local => \%subst_map_overrides, };
+	return $pv;
 }
 
-#####################################################################
-# initialise_subst_requests:
-#  record any parameter values set from the command line. A separate
+###################################################################################
+# combine_pvs:
+#  parameters:
+#    param_vals_fns - ref to array of file names (JSON) containing parameter values
+#    clpv - parameter value structure created from command-line (optional)
+#
+#  Combine a set of parameter value specifications, from files and/or command-line
+###################################################################################
+sub combine_pvs {
+	my ($param_vals_fns, $clpv) = @_;
+	my $target = {};
+	my @all_pvs = ();
+
+	# read the pv data from files, add to list
+	for my $fn (@{$param_vals_fns}) {
+
+		if(! -e ${fn}) {
+			carp qq[Failed to find file $fn];
+			next;
+		}
+
+		my $pv = from_json(read_file($fn));
+
+		push @all_pvs, $pv;
+	}
+	if($clpv) {
+		push @all_pvs, $clpv; # add parameter value structure created from command-line
+	}
+
+#	Hash::Merge::set_behavior( 'RIGHT_PRECEDENT' );
+#	Hash::Merge::set_behavior( 'LEFT_PRECEDENT' );
+	# merge user-supplied params files with slightly modified RIGHT_PRECEDENT behaviour
+	Hash::Merge::specify_behavior(
+		{
+			'SCALAR' => {
+				'SCALAR' => sub { $_[1] },
+				'ARRAY'  => sub { $_[1] }, # differs from RIGHT_PRECEDENT
+				'HASH'   => sub { $_[1] },
+			},
+			'ARRAY' => {
+				'SCALAR' => sub { $_[1] },
+				'ARRAY'  => sub { [ @{ $_[0] }, @{ $_[1] } ] },
+				'HASH'   => sub { $_[1] },
+			},
+			'HASH' => {
+				'SCALAR' => sub { $_[1] },
+				'ARRAY'  => sub { $_[1] }, # differs from RIGHT_PRECEDENT
+				'HASH'   => sub { Hash::Merge::_merge_hashes( $_[0], $_[1] ) },
+			},
+		},
+		'My Behavior',
+	);
+	for my $pv (@all_pvs) {
+
+		$target->{assign} = [ merge($target->{assign}->[0], $pv->{assign}->[0]) ];
+		$target->{assign_local} = merge($target->{assign_local}, $pv->{assign_local});
+	}
+
+	$target->{assign} ||= [];
+	$target->{assign_local} ||= {};
+	$target->{param_store} ||= [];
+	return $target;
+}
+
+######################################################################
+# initialise_params:
+#  Record any parameter values set from the command line. A separate
 #  store is used for "localised" parameter setting (ones applied when
-#  subst_requests store for VTFILE expansion is set up)
-#  if a key is specified more than once, its value becomes a list ref
-#####################################################################
-sub initialise_subst_requests {
-	my ($keys, $vals, $nullkeys) = @_;
-	my %subst_requests = ();
-	my %subst_map_overrides = ();
-
-	if(@$keys != @$vals) {
-		croak q[Mismatch between keys and vals];
-	}
-
-	for my $nullkey (@$nullkeys) {
-		$subst_requests{$nullkey} = undef;
-	}
-
-	for my $i (0..$#{$keys}) {
-		my ($locality, $param_name) = _parse_localised_param_name($keys->[$i]);
-		my $param_value = $vals->[$i];
-
-		if($locality) {
-			# put it in the subst_map_overrides
-			if(defined $subst_map_overrides{$locality}->{$param_name}) {
-				if(ref $subst_map_overrides{$locality}->{$param_name} ne q[ARRAY]) {
-					$subst_map_overrides{$locality}->{$param_name} = [ $subst_map_overrides{$locality}->{$param_name} ];
-				}
-
-				push @{$subst_map_overrides{$locality}->{$param_name}}, $param_value;
-			}
-			else {
-				$subst_map_overrides{$locality}->{$param_name} = $param_value;
-			}
-		}
-		elsif(defined $subst_requests{$param_name}) {
-			if(ref $subst_requests{$param_name} ne q[ARRAY]) {
-				$subst_requests{$param_name} = [ $subst_requests{$param_name} ];
-			}
-
-			push @{$subst_requests{$param_name}}, $param_value;
-		}
-		else {
-			$subst_requests{$param_name} = $param_value;
-		}
-	}
-
-	return ([ \%subst_requests ], \%subst_map_overrides);  # note: the return value is a ref to a list of hash refs
-}
+#  subst_requests store for VTFILE expansion is set up).
+#  If a key is specified more than once, its value becomes a list ref.
+#  an empty initial param_store is added.
+######################################################################
+# REFsub initialise_params {
+# REF	my ($keys, $vals, $nullkeys, $param_vals) = @_;
+# REF	my %subst_requests = ();
+# REF	my %subst_map_overrides = ();
+# REF
+# REF	if(@$keys != @$vals) {
+# REF		croak q[Mismatch between keys and vals];
+# REF	}
+# REF
+# REF	for my $nullkey (@$nullkeys) {
+# REF		$subst_requests{$nullkey} = undef;
+# REF	}
+# REF
+# REF	for my $i (0..$#{$keys}) {
+# REF		my ($locality, $param_name) = _parse_localised_param_name($keys->[$i]);
+# REF		my $param_value = $vals->[$i];
+# REF
+# REF		if($locality) {
+# REF			# put it in the subst_map_overrides
+# REF			if(defined $subst_map_overrides{$locality}->{$param_name}) {
+# REF				if(ref $subst_map_overrides{$locality}->{$param_name} ne q[ARRAY]) {
+# REF					$subst_map_overrides{$locality}->{$param_name} = [ $subst_map_overrides{$locality}->{$param_name} ];
+# REF				}
+# REF
+# REF				push @{$subst_map_overrides{$locality}->{$param_name}}, $param_value;
+# REF			}
+# REF			else {
+# REF				$subst_map_overrides{$locality}->{$param_name} = $param_value;
+# REF			}
+# REF		}
+# REF		elsif(defined $subst_requests{$param_name}) {
+# REF			if(ref $subst_requests{$param_name} ne q[ARRAY]) {
+# REF				$subst_requests{$param_name} = [ $subst_requests{$param_name} ];
+# REF			}
+# REF
+# REF			push @{$subst_requests{$param_name}}, $param_value;
+# REF		}
+# REF		else {
+# REF			$subst_requests{$param_name} = $param_value;
+# REF		}
+# REF	}
+# REF
+# REF# WIP	return ([ \%subst_requests ], \%subst_map_overrides);  # note: the return value is a ref to a list of hash refs
+# REF
+# REF	return { param_store =>  [], assign => [ \%subst_requests ], assign_local => \%subst_map_overrides, };
+# REF}
 
 #########################################################
 # _parse_localised_param_name
