@@ -149,7 +149,6 @@ print $out to_json($flat_graph);
 # Returns: root of tree of vtnodes (for later flattening)
 ##########################################################################################
 sub process_vtnode {
-# WIP	my ($vtnode_id, $vtf_name, $node_prefix, $param_store, $subst_requests, $subst_map_overrides, $globals) = @_;
 	my ($vtnode_id, $vtf_name, $node_prefix, $params, $globals) = @_;
 
 	my $vtnode = {
@@ -173,10 +172,8 @@ sub process_vtnode {
 
 	$vtnode->{node_prefix} = get_node_prefix($node_prefix, $globals->{node_prefixes});
 	$vtnode->{cfg} = read_vtf_version_check($vtf_name, $MIN_TEMPLATE_VERSION, $globals->{template_path}, );
-# WIP	$param_store = process_subst_params($param_store, $subst_requests, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals, $vtnode->{ewi});
 	$params = process_subst_params($params, $vtnode->{cfg}->{subst_params}, [ $vtf_name ], $globals, $vtnode->{ewi});
 
-# WIP	apply_subst($vtnode->{cfg}, $param_store, $subst_requests, $vtnode->{ewi});   # process any subst directives in cfg (just nodes and edges)
 	apply_subst($vtnode->{cfg}, $params, $vtnode->{ewi});   # process any subst directives in cfg (just nodes and edges)
 
 	my @vtf_nodes = ();
@@ -198,22 +195,16 @@ sub process_vtnode {
 		# now update with any "localised" subst_requests from the command-line (replace, not supplement)
 		my $local_env_key = join(q[:], @{$globals->{vt_node_stack}}) . q{:} . $vtf_node->{id};
 		$local_env_key = substr($local_env_key, 1); # remove initial :
-# WIP		if(my $smo = $subst_map_overrides->{$local_env_key}) {
 		if(my $smo = $params->{assign_local}->{$local_env_key}) {
 			@{$sr}{keys %{$smo}} = values %{$smo};
 		}
 
-# WIP		unshift @$subst_requests, $sr;
 		unshift @{$params->{assign}}, $sr;
 		my $ps = { varnames => {}, };
-# WIP		unshift @$param_store, $ps;
 		unshift @{$params->{param_store}}, $ps;
 
-# WIP		my $vtc = process_vtnode($vtf_node->{id}, $vtf_node->{name}, $vtf_node->{node_prefix}, $param_store, $subst_requests, $subst_map_overrides, $globals);
 		my $vtc = process_vtnode($vtf_node->{id}, $vtf_node->{name}, $vtf_node->{node_prefix}, $params, $globals);
 
-# WIP		shift @$param_store;
-# WIP		shift @$subst_requests;
 		shift @{$params->{param_store}};
 		shift @{$params->{assign}};
 
@@ -264,12 +255,6 @@ sub get_node_prefix {
 #                        should be applied to override or supplement any parameter values
 #                        added to the initial local subst_request entry created for
 #                        VTFILE node expansion
-# WIP  param_store - a stack of maps of variable names to their values or constructor;
-# WIP                  supplies the values when subst directives are processed
-# WIP  subst_requests - a stack of key/value pairs. Keys are subst_param varnames,
-# WIP                    values are string values; supplied at run time or via subst_map
-# WIP                    attributes in VTFILE nodes; used here to expand subst directives
-# WIP                    that appear in subst_param entries
 #  unprocessed_subst_params - the list of subst_param entries to process; either of
 #                    type PARAM (describes how to retrieve/construct the value for the
 #                    specified varname) or SPFILE (specifies a file containing
@@ -295,12 +280,10 @@ sub get_node_prefix {
 #  more sophisticated structure for elements on this stack to improve error reporting
 #######################################################################################
 sub process_subst_params {
-# WIP	my ($param_store, $subst_requests, $unprocessed_subst_params, $sp_file_stack, $globals, $ewi) = @_;
 	my ($params, $unprocessed_subst_params, $sp_file_stack, $globals, $ewi) = @_;
 	my @spfile_node_queue = ();
 
 	my $param_store = $params->{param_store};
-# WIP	$param_store ||= [ { varnames => {}, } ];
 
 	for my $i (0..$#{$unprocessed_subst_params}) {
 
@@ -345,9 +328,7 @@ sub process_subst_params {
 	################################
 	for my $spfile (@spfile_node_queue) {
 		my $ewi = mkewi(q[SPF]);
-# WIP		subst_walk($spfile, $param_store, $subst_requests, [], $ewi);
 		subst_walk($spfile, $params, [], $ewi);
-#		if($ewi->{report}->()) { croak q[Exiting after SPFILE processing...]; };
 		my $spname = is_valid_name($spfile->{name});
 		if(not $spname) {
 			# it would be better to cache these errors and report as many as possible before exit (TBI)
@@ -362,7 +343,6 @@ sub process_subst_params {
 			#  files must contain (new-style) subst_param sections to be useful
 			if(defined $cfg->{subst_params}) {
 				push @$sp_file_stack, $spname;
-# WIP				process_subst_params($param_store, $subst_requests, $cfg->{subst_params}, $sp_file_stack, $globals, $ewi);
 				process_subst_params($params, $cfg->{subst_params}, $sp_file_stack, $globals, $ewi);
 				pop @$sp_file_stack;
 			}
@@ -372,7 +352,6 @@ sub process_subst_params {
 		}
 	}
 
-# WIP	return $param_store;
 	return $params;
 }
 
@@ -409,12 +388,10 @@ sub in_param_store {
 #  replace subst directives with values
 #######################################
 sub apply_subst {
-# WIP	my ($cfg, $param_store, $subst_requests, $ewi) = @_;   # process any subst directives in cfg (just nodes and edges?)
 	my ($cfg, $params, $ewi) = @_;   # process any subst directives in cfg (just nodes and edges?)
 
 	for my $elem (@{$cfg->{nodes}}, @{$cfg->{edges}}) {
 		$ewi->{addlabel}->(q{assigning to id:[} . $elem->{id} . q{]});
-# WIP		subst_walk($elem, $param_store, $subst_requests, [], $ewi);
 		subst_walk($elem, $params, [], $ewi);
 		$ewi->{removelabel}->();
 	}
@@ -428,7 +405,6 @@ sub apply_subst {
 #   lists for the desired key/value pair
 ##############################################################################################################
 sub subst_walk {
-# WIP	my ($elem, $param_store, $subst_requests, $labels, $ewi) = @_;
 	my ($elem, $params, $labels, $ewi) = @_;
 
 	my $r = ref $elem;
@@ -444,7 +420,6 @@ sub subst_walk {
 					$ewi->{additem}->($EWI_ERROR, 0, q[value for a subst directive must be a param (not a reference), key for subst is: ], $k);
 				}
 
-# WIP				$elem->{$k} = fetch_subst_value($param_name, $param_store, $subst_requests, $ewi);
 				$elem->{$k} = fetch_subst_value($param_name, $params, $ewi);
 
 				unless(defined $elem->{$k}) { # this has been changed to INFO. If ERROR is wanted, required attribute should be set so that fetch_subst_value() flags it
@@ -456,7 +431,6 @@ sub subst_walk {
 
 			if(ref $elem->{$k}) {
 				push @$labels, $k;
-# WIP				subst_walk($elem->{$k}, $param_store, $subst_requests, $labels, $ewi);
 				subst_walk($elem->{$k}, $params, $labels, $ewi);
 				pop @$labels;
 			}
@@ -471,7 +445,6 @@ sub subst_walk {
 					$ewi->{additem}->($EWI_ERROR, 0, q[value for a subst directive must be a param name (not a reference), index for subst is: ], $i);
 				}
 
-# WIP				my $sval = fetch_subst_value($param_name, $param_store, $subst_requests, $ewi);
 				my $sval = fetch_subst_value($param_name, $params, $ewi);
 				if(ref $sval eq q[ARRAY]) {
 					splice @$elem, $i, 1, @$sval;
@@ -489,7 +462,6 @@ sub subst_walk {
 
 			if(ref $elem->[$i]) {
 				push @$labels, sprintf(q[ArrayElem%03d], $i);
-# WIP				subst_walk($elem->[$i], $param_store, $subst_requests, $labels, $ewi);
 				subst_walk($elem->[$i], $params, $labels, $ewi);
 				pop @$labels;
 			}
@@ -628,14 +600,13 @@ sub fetch_subst_value {
 	return $retval;
 }
 
-#######################################################################################################
+##################################################################################################
 # resolve_subst_array:
 #   caller will have already flattened the array (i.e. no ref elements)
 #   process as specified by op directives (pack, concat,...)
-#   validate proposed substitution value
-#      1. if it contains any undef elements, it is invalid.
-#      2. if it contains any null string elements but no allow_null_strings opt, it is invalid. (TBI)
-#######################################################################################################
+#   validate proposed substitution value. If it contains any undef elements, it is invalid (caller
+#    determines severity of error)
+##################################################################################################
 sub resolve_subst_array {
 	my ($subst_param, $subst_value) = @_;
 
@@ -866,50 +837,8 @@ sub initialise_params {
 	my ($keys, $vals, $nullkeys, $param_vals_fns) = @_;
 
 	my $pv = {};
-#	my $subst_requests = {};
-#	my $subst_map_overrides = {};
-
-#	if(@$keys != @$vals) {
-#		croak q[Mismatch between keys and vals];
-#	}
-#
-#	for my $nullkey (@$nullkeys) {
-#		$subst_requests->{$nullkey} = undef;
-#	}
 
 	$pv = construct_pv($keys, $vals, $nullkeys);
-
-#	if(@{$keys}) {
-#		for my $i (0..$#{$keys}) {
-#			my ($locality, $param_name) = _parse_localised_param_name($keys->[$i]);
-#			my $param_value = $vals->[$i];
-#
-#			if($locality) {
-#				# put it in the subst_map_overrides
-#				if(defined $subst_map_overrides->{$locality}->{$param_name}) {
-#					if(ref $subst_map_overrides->{$locality}->{$param_name} ne q[ARRAY]) {
-#						$subst_map_overrides->{$locality}->{$param_name} = [ $subst_map_overrides->{$locality}->{$param_name} ];
-#					}
-#
-#					push @{$subst_map_overrides->{$locality}->{$param_name}}, $param_value;
-#				}
-#				else {
-#					$subst_map_overrides->{$locality}->{$param_name} = $param_value;
-#				}
-#			}
-#			elsif(defined $subst_requests->{$param_name}) {
-#				if(ref $subst_requests->{$param_name} ne q[ARRAY]) {
-#					$subst_requests->{$param_name} = [ $subst_requests->{$param_name} ];
-#				}
-#
-#				push @{$subst_requests->{$param_name}}, $param_value;
-#			}
-#			else {
-#				$subst_requests->{$param_name} = $param_value;
-#			}
-#		}
-#		$pvs = [ { param_store =>  [], assign => [ $subst_requests ], assign_local => $subst_map_overrides, } ];
-#	}
 
 	return combine_pvs($param_vals_fns, $pv);
 }
@@ -1027,61 +956,6 @@ sub combine_pvs {
 	$target->{param_store} ||= [];
 	return $target;
 }
-
-######################################################################
-# initialise_params:
-#  Record any parameter values set from the command line. A separate
-#  store is used for "localised" parameter setting (ones applied when
-#  subst_requests store for VTFILE expansion is set up).
-#  If a key is specified more than once, its value becomes a list ref.
-#  an empty initial param_store is added.
-######################################################################
-# REFsub initialise_params {
-# REF	my ($keys, $vals, $nullkeys, $param_vals) = @_;
-# REF	my %subst_requests = ();
-# REF	my %subst_map_overrides = ();
-# REF
-# REF	if(@$keys != @$vals) {
-# REF		croak q[Mismatch between keys and vals];
-# REF	}
-# REF
-# REF	for my $nullkey (@$nullkeys) {
-# REF		$subst_requests{$nullkey} = undef;
-# REF	}
-# REF
-# REF	for my $i (0..$#{$keys}) {
-# REF		my ($locality, $param_name) = _parse_localised_param_name($keys->[$i]);
-# REF		my $param_value = $vals->[$i];
-# REF
-# REF		if($locality) {
-# REF			# put it in the subst_map_overrides
-# REF			if(defined $subst_map_overrides{$locality}->{$param_name}) {
-# REF				if(ref $subst_map_overrides{$locality}->{$param_name} ne q[ARRAY]) {
-# REF					$subst_map_overrides{$locality}->{$param_name} = [ $subst_map_overrides{$locality}->{$param_name} ];
-# REF				}
-# REF
-# REF				push @{$subst_map_overrides{$locality}->{$param_name}}, $param_value;
-# REF			}
-# REF			else {
-# REF				$subst_map_overrides{$locality}->{$param_name} = $param_value;
-# REF			}
-# REF		}
-# REF		elsif(defined $subst_requests{$param_name}) {
-# REF			if(ref $subst_requests{$param_name} ne q[ARRAY]) {
-# REF				$subst_requests{$param_name} = [ $subst_requests{$param_name} ];
-# REF			}
-# REF
-# REF			push @{$subst_requests{$param_name}}, $param_value;
-# REF		}
-# REF		else {
-# REF			$subst_requests{$param_name} = $param_value;
-# REF		}
-# REF	}
-# REF
-# REF# WIP	return ([ \%subst_requests ], \%subst_map_overrides);  # note: the return value is a ref to a list of hash refs
-# REF
-# REF	return { param_store =>  [], assign => [ \%subst_requests ], assign_local => \%subst_map_overrides, };
-# REF}
 
 #########################################################
 # _parse_localised_param_name
@@ -1301,7 +1175,6 @@ sub mkewi {
 				if($ewi_item->{type} == $EWI_ERROR and $ewi_item->{subclass} <= $fatality_level) { $ewi_retstat = 1; }
 
 				$logger->($VLMIN, join("\t", ($ewi_type_names{$ewi_item->{type}}, $ewi_item->{subclass}, $ewi_item->{ms},)));
-#				print STDERR join("\t", ($ewi_type_names{$ewi_item->{type}}, $ewi_item->{subclass}, $ewi_item->{ms},));
 			}
 
 			return $ewi_retstat;
