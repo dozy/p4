@@ -99,11 +99,14 @@ if(report_pv_ewi($node_tree, $logger)) { croak qq[Exiting after process_vtnode..
 
 my $flat_graph = flatten_tree($node_tree);
 
-if($absolute_program_paths) {
-	foreach my $node_with_cmd ( grep {$_->{'cmd'}} @{$flat_graph->{'nodes'}}) {
+foreach my $node_with_cmd ( grep {$_->{'cmd'}} @{$flat_graph->{'nodes'}}) {
 
-		$node_with_cmd->{cmd} = finalise_cmd($node_with_cmd->{cmd});
+	$node_with_cmd->{cmd} = finalise_cmd($node_with_cmd->{cmd});
+	if(not defined $node_with_cmd->{cmd} or (ref $node_with_cmd->{cmd} eq q[ARRAY] and @{$node_with_cmd->{cmd}} < 1)) {
+		croak "command ", ($node_with_cmd->{id}? $node_with_cmd->{id}: q[NO ID]), " either empty or undefined";
+	}
 
+	if($absolute_program_paths) {
 		my $cmd_ref = \$node_with_cmd->{'cmd'};
 		if(ref ${$cmd_ref} eq 'ARRAY') { $cmd_ref = \${${$cmd_ref}}[0]}
 		${$cmd_ref} =~ s/\A(\S+)/ abs_path( (-x $1 ? $1 : undef) || (which $1) || croak "cannot find program $1" )/e;
@@ -420,7 +423,7 @@ sub subst_walk {
 					$ewi->{additem}->($EWI_ERROR, 0, q[value for a subst directive must be a param (not a reference), key for subst is: ], $k);
 				}
 
-				$elem->{$k} = fetch_subst_value($param_name, $params, $ewi);
+				$elem->{$k} = fetch_subst_value($elem->{$k}, $params, $ewi);
 
 				unless(defined $elem->{$k}) { # this has been changed to INFO. If ERROR is wanted, required attribute should be set so that fetch_subst_value() flags it
 					$ewi->{additem}->($EWI_INFO, 1, q[Failed to fetch subst value for parameter ], $param_name, q[ (key was ], $k, q[)]);
@@ -445,7 +448,7 @@ sub subst_walk {
 					$ewi->{additem}->($EWI_ERROR, 0, q[value for a subst directive must be a param name (not a reference), index for subst is: ], $i);
 				}
 
-				my $sval = fetch_subst_value($param_name, $params, $ewi);
+				my $sval = fetch_subst_value($elem->[$i], $params, $ewi);
 				if(ref $sval eq q[ARRAY]) {
 					splice @$elem, $i, 1, @$sval;
 				}
@@ -503,9 +506,21 @@ sub subst_walk {
 #       record it as an error; return undef for caller to handle
 ##################################################################
 sub fetch_subst_value {
-	my ($param_name, $params, $ewi, $irp) = @_;
+	my ($subst, $params, $ewi, $irp) = @_;
 	my $param_entry;
 	my $retval;
+
+	# check to see if a recursive subst directive is used
+	if(exists $subst->{subst} and ref $subst->{subst} eq q[HASH]) {
+		$subst->{subst} = fetch_subst_value($subst->{subst}, $params, $ewi, $irp);
+	}
+
+	if(ref $subst->{subst}) {
+		$ewi->{additem}->($EWI_ERROR, 0, q[subst value cannot be an array ref]);
+		return;
+	}
+
+	my $param_name = $subst->{subst};
 
 	if(defined $irp and any { $_ eq $param_name} @{$irp}) { # infinite recursion prevention
 		$ewi->{additem}->($EWI_ERROR, 0, q[infinite recursion detected resolving parameter ], $param_name, q[ (], join(q/=>/, (@{$irp}, $param_name)), q[)]);
@@ -558,7 +573,7 @@ sub fetch_subst_value {
 
 		for my $i (reverse (0..$#$vals)) {
 			if(ref $vals->[$i] eq q[HASH] and $vals->[$i]->{subst}) {
-				$vals->[$i] = fetch_subst_value($vals->[$i]->{subst}, $params, $ewi);
+				$vals->[$i] = fetch_subst_value($vals->[$i], $params, $ewi);
 				if(ref $vals->[$i] eq q[ARRAY]) {
 					splice(@$vals, $i, 1, (@{$vals->[$i]}));
 				}
@@ -581,7 +596,7 @@ sub fetch_subst_value {
 		if(ref $param_entry->{default} and $param_entry->{default}->{subst}) {
 			$irp ||= [];
 			push @{$irp}, $param_name;
-			$param_entry->{_value} = fetch_subst_value($param_entry->{default}->{subst}, $params, $ewi, $irp);
+			$param_entry->{_value} = fetch_subst_value($param_entry->{default}, $params, $ewi, $irp);
 		}
 		else {
 			$param_entry->{_value} = $param_entry->{default};
