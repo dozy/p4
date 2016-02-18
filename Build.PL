@@ -69,6 +69,7 @@ my $builder = $class->new(
   },
 
   'requires' => {
+    'BSD::Resource'          => 0,
     'Carp'                  => 0,
     'Cwd'                   => 0,
     'Data::Dumper'          => 0,
