@@ -7,6 +7,7 @@ use File::Slurp;
 use JSON;
 use POSIX;
 use Fcntl;
+use BSD::Resource;
 use File::Temp qw/ tempdir /;
 use Getopt::Std;
 use Readonly;
@@ -326,6 +327,14 @@ sub _fork_off {
 			print STDERR ' fileno(STDOUT,'.(fileno STDOUT).') writing to '.($node->{'STDOUT'}?$node->{'STDOUT'}:'stdout') ."\n";
 			print STDERR ' select waiting on STDIN' ."\n";
 			my$rin="";vec($rin,fileno(STDIN),1)=1; select($rin,undef,undef,undef);
+
+			if(my $memlimit=$node->{'memlimit'}) {
+				$logger->($VLMED, qq[Resetting RLIMIT_AS to $memlimit for process $$]);
+				print STDERR qq[ Resetting RLIMIT_AS (soft and hard) to $memlimit\n];
+				my $success;
+				$success = setrlimit(q{RLIMIT_AS}, $memlimit, $memlimit) or croak qq[Failed to set RLIMIT_AS to $memlimit (ret: $success)];
+			}
+
 			$logger->($VLMED, qq[Child $$ execing]);
 			print STDERR " execing....\n";
 			exec @cmd or croak qq[Failed to exec cmd: ], join " ", @cmd;
