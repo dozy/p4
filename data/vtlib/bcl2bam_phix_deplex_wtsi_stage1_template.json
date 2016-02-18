@@ -342,6 +342,7 @@
 	{
 		"id":"queryname_sort",
 		"type":"EXEC",
+		"memlimit":{"subst":"qs_memlim", "ifnull":8000000000},
 		"cmd":[
 			"bamsormadup",
 			"SO=queryname",
