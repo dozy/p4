@@ -34,6 +34,7 @@ my $graph = {
 # create test object for all subtests
 my $test = Test::Cmd->new( prog => $odir.'/bin/viv.pl', workdir => q());
 ok($test, 'made test object');
+my $test_curdir = $test->curdir;
 
 # create input JSON for all subtests
 my $graph_json = to_json($graph) or croak q[Failed to produce JSON test graph];
@@ -44,24 +45,11 @@ if($? != 0) { croak qq[Failed to create test input graph file $graph_file]; }
 $test->write($infile, q[qwertyuiop]);
 if($? != 0) { croak qq[Failed to create test input file $infile]; }
 
-subtest 'test simple graph without using -t option' => sub {
-    plan tests => 3;
-
-    my $exit_status = $test->run(chdir => $test->curdir, args => "-s -x $graph_file");
-    ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
-
-    my $outdata;
-    my $read_file = $test->read(\$outdata, $outfile);
-    ok($read_file, "read output from $outfile");
-
-    is($outdata,"PYTRWQ\n","expected output (PYTRWQ)");
-};
-
 subtest 'test simple graph siphoning off output from one node to a temporary file using the -t option' => sub {
     plan tests => 5;
     my $teefile1 = q[teefile1.txt];
 
-    my $exit_status = $test->run(chdir => $test->curdir, args => "-t cap=$teefile1 -s -x $graph_file");
+    my $exit_status = $test->run(chdir => $test_curdir, args => "-t cap=$teefile1 -s -x $graph_file");
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
 
     my $outdata;
@@ -76,12 +64,25 @@ subtest 'test simple graph siphoning off output from one node to a temporary fil
     is($outdata,"QWERTYUIOP","expected output (QWERTYUIOP)");
 };
 
+subtest 'test simple graph without using -t option' => sub {
+    plan tests => 3;
+
+    my $exit_status = $test->run(chdir => $test_curdir, args => "-s -x $graph_file");
+    ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
+
+    my $outdata;
+    my $read_file = $test->read(\$outdata, $outfile);
+    ok($read_file, "read output from $outfile");
+
+    is($outdata,"PYTRWQ\n","expected output (PYTRWQ)");
+};
+
 subtest 'test simple graph siphoning off output from two nodes to temporary files using the -t option' => sub {
     plan tests => 7;
     my $teefile1 = q[teefile1.txt];
     my $teefile2 = q[teefile2.txt];
 
-    my $exit_status = $test->run(chdir => $test->curdir, args => qq[-t "cap=$teefile1;rev=$teefile2" -s -x $graph_file]);
+    my $exit_status = $test->run(chdir => $test_curdir, args => qq[-t "cap=$teefile1;rev=$teefile2" -s -x $graph_file]);
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
 
     my $outdata;
