@@ -58,12 +58,15 @@ subtest 'test simple graph without using -t option' => sub {
 };
 
 subtest 'test simple graph siphoning off output from one node to a temporary file using the -t option' => sub {
-    plan tests => 5;
+    plan tests => 6;
     my $teefile1 = q[teefile1.txt];
 
     # create input data file
     $test->write($infile, q[qwertyuiop]);
     if($? != 0) { croak qq[Failed to create test input file $infile]; }
+
+$test = Test::Cmd->new( prog => $odir.'/bin/viv.pl', workdir => q());
+ok($test, 'made test object');
 
     my $exit_status = $test->run(chdir => $test->curdir, args => "-t cap=$teefile1 -s -x $graph_file");
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
