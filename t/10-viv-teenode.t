@@ -45,6 +45,25 @@ if($? != 0) { croak qq[Failed to create test input graph file $graph_file]; }
 $test->write($infile, q[qwertyuiop]);
 if($? != 0) { croak qq[Failed to create test input file $infile]; }
 
+subtest 'test simple graph siphoning off output from one node to a temporary file using the -t option' => sub {
+    plan tests => 5;
+    my $teefile1 = q[teefile1.txt];
+
+    my $exit_status = $test->run(chdir => $test_curdir, args => "-t cap=$teefile1 -s -x $graph_file");
+    ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
+
+    my $outdata;
+    my $read_file = $test->read(\$outdata, $outfile);
+    ok($read_file, "read test output: $outfile");
+
+    is($outdata,"PYTRWQ\n","expected output (PYTRWQ)");
+
+    $read_file = $test->read(\$outdata, $teefile1);
+    ok($read_file, qq[read intermediate output from $teefile1]);
+
+    is($outdata,"QWERTYUIOP","expected output (QWERTYUIOP)");
+};
+
 subtest 'test simple graph siphoning off output from two nodes to temporary files using the -t option' => sub {
     plan tests => 7;
     my $teefile1 = q[teefile1.txt];
@@ -68,25 +87,6 @@ subtest 'test simple graph siphoning off output from two nodes to temporary file
     ok($read_file, "read intermediate output from $teefile2");
 
     is($outdata,"POIUYTREWQ\n","expected output (POIUYTREWQ)");
-};
-
-subtest 'test simple graph siphoning off output from one node to a temporary file using the -t option' => sub {
-    plan tests => 5;
-    my $teefile1 = q[teefile1.txt];
-
-    my $exit_status = $test->run(chdir => $test_curdir, args => "-t cap=$teefile1 -s -x $graph_file");
-    ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
-
-    my $outdata;
-    my $read_file = $test->read(\$outdata, $outfile);
-    ok($read_file, "read test output: $outfile");
-
-    is($outdata,"PYTRWQ\n","expected output (PYTRWQ)");
-
-    $read_file = $test->read(\$outdata, $teefile1);
-    ok($read_file, qq[read intermediate output from $teefile1]);
-
-    is($outdata,"QWERTYUIOP","expected output (QWERTYUIOP)");
 };
 
 subtest 'test simple graph without using -t option' => sub {
