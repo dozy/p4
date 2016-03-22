@@ -41,6 +41,8 @@ my $graph_json = to_json($graph) or croak q[Failed to produce JSON test graph];
 $test->write($graph_file, $graph_json);
 if($? != 0) { croak qq[Failed to create test input graph file $graph_file]; }
 
+carp q[graph_json: ], $graph_json;
+
 # create input data file for all subtests
 $test->write($infile, q[qwertyuiop]);
 if($? != 0) { croak qq[Failed to create test input file $infile]; }
@@ -48,7 +50,7 @@ if($? != 0) { croak qq[Failed to create test input file $infile]; }
 subtest 'test simple graph without using -t option' => sub {
     plan tests => 3;
 
-    my $exit_status = $test->run(chdir => $test_curdir, args => "-s -x $graph_file");
+    my $exit_status = $test->run(chdir => $test_curdir, args => "-v 0 -s -x $graph_file");
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
 
     my $outdata;
@@ -62,7 +64,7 @@ subtest 'test simple graph siphoning off output from one node to a temporary fil
     plan tests => 5;
     my $teefile1 = q[teefile1.txt];
 
-    my $args_str = sprintf q[-s -x -t cap=%s %s], $teefile1, $graph_file;
+    my $args_str = sprintf q[-v 0 -s -x -t cap=%s %s], $teefile1, $graph_file;
     carp q[Args str: ], $args_str;
 #   my $exit_status = $test->run(chdir => $test_curdir, args => "-s -x -t cap=$teefile1 $graph_file");
     my $exit_status = $test->run(chdir => $test_curdir, args => $args_str);
@@ -85,7 +87,7 @@ subtest 'test simple graph siphoning off output from two nodes to temporary file
     my $teefile1 = q[teefile1.txt];
     my $teefile2 = q[teefile2.txt];
 
-    my $args_str = sprintf q[-s -x -t "cap=%s;rev=%s" %s], $teefile1, $teefile2, $graph_file;
+    my $args_str = sprintf q[-v 0 -s -x -t "cap=%s;rev=%s" %s], $teefile1, $teefile2, $graph_file;
     carp q[Args str: ], $args_str;
 #   my $exit_status = $test->run(chdir => $test_curdir, args => qq[-s -x -t "cap=$teefile1;rev=$teefile2" $graph_file]);
     my $exit_status = $test->run(chdir => $test_curdir, args => $args_str);
