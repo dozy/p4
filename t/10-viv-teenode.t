@@ -62,7 +62,7 @@ subtest 'test simple graph siphoning off output from one node to a temporary fil
     plan tests => 5;
     my $teefile1 = q[teefile1.txt];
 
-    my $exit_status = $test->run(chdir => $test_curdir, args => "-t cap=$teefile1 -s -x $graph_file");
+    my $exit_status = $test->run(chdir => $test_curdir, args => "-s -x -t cap=$teefile1 $graph_file");
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
 
     my $outdata;
@@ -82,7 +82,7 @@ subtest 'test simple graph siphoning off output from two nodes to temporary file
     my $teefile1 = q[teefile1.txt];
     my $teefile2 = q[teefile2.txt];
 
-    my $exit_status = $test->run(chdir => $test_curdir, args => qq[-t "cap=$teefile1;rev=$teefile2" -s -x $graph_file]);
+    my $exit_status = $test->run(chdir => $test_curdir, args => qq[-s -x -t "cap=$teefile1;rev=$teefile2" $graph_file]);
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
 
     my $outdata;
