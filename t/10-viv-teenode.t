@@ -40,12 +40,12 @@ my $graph_json = to_json($graph) or croak q[Failed to produce JSON test graph];
 $test->write($graph_file, $graph_json);
 if($? != 0) { croak qq[Failed to create test input graph file $graph_file]; }
 
+# create input data file for all subtests
+$test->write($infile, q[qwertyuiop]);
+if($? != 0) { croak qq[Failed to create test input file $infile]; }
+
 subtest 'test simple graph without using -t option' => sub {
     plan tests => 3;
-
-    # create input data file
-    $test->write($infile, q[qwertyuiop]);
-    if($? != 0) { croak qq[Failed to create test input file $infile]; }
 
     my $exit_status = $test->run(chdir => $test->curdir, args => "-s -x $graph_file");
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
@@ -54,19 +54,12 @@ subtest 'test simple graph without using -t option' => sub {
     my $read_file = $test->read(\$outdata, $outfile);
     ok($read_file, "read output from $outfile");
 
-    is($outdata,"PYTRWQ\n","expected output");
+    is($outdata,"PYTRWQ\n","expected output (PYTRWQ)");
 };
 
 subtest 'test simple graph siphoning off output from one node to a temporary file using the -t option' => sub {
-    plan tests => 6;
+    plan tests => 5;
     my $teefile1 = q[teefile1.txt];
-
-    # create input data file
-    $test->write($infile, q[qwertyuiop]);
-    if($? != 0) { croak qq[Failed to create test input file $infile]; }
-
-$test = Test::Cmd->new( prog => $odir.'/bin/viv.pl', workdir => q());
-ok($test, 'made test object');
 
     my $exit_status = $test->run(chdir => $test->curdir, args => "-t cap=$teefile1 -s -x $graph_file");
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
@@ -75,22 +68,18 @@ ok($test, 'made test object');
     my $read_file = $test->read(\$outdata, $outfile);
     ok($read_file, "read test output: $outfile");
 
-    is($outdata,"PYTRWQ\n","expected output");
+    is($outdata,"PYTRWQ\n","expected output (PYTRWQ)");
 
     $read_file = $test->read(\$outdata, $teefile1);
     ok($read_file, qq[read intermediate output from $teefile1]);
 
-    is($outdata,"QWERTYUIOP","expected output");
+    is($outdata,"QWERTYUIOP","expected output (QWERTYUIOP)");
 };
 
 subtest 'test simple graph siphoning off output from two nodes to temporary files using the -t option' => sub {
     plan tests => 7;
     my $teefile1 = q[teefile1.txt];
     my $teefile2 = q[teefile2.txt];
-
-    # create input data file
-    $test->write($infile, q[qwertyuiop]);
-    if($? != 0) { croak qq[Failed to create test input file $infile]; }
 
     my $exit_status = $test->run(chdir => $test->curdir, args => qq[-t "cap=$teefile1;rev=$teefile2" -s -x $graph_file]);
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
@@ -99,17 +88,17 @@ subtest 'test simple graph siphoning off output from two nodes to temporary file
     my $read_file = $test->read(\$outdata, $outfile);
     ok($read_file, "read output from $outfile");
 
-    is($outdata,"PYTRWQ\n","expected output");
+    is($outdata,"PYTRWQ\n","expected output (PYTRWQ)");
 
     $read_file = $test->read(\$outdata, $teefile1);
     ok($read_file, "read intermediate output from $teefile1");
 
-    is($outdata,"QWERTYUIOP","expected output");
+    is($outdata,"QWERTYUIOP","expected output (QWERTYUIOP)");
 
     $read_file = $test->read(\$outdata, $teefile2);
     ok($read_file, "read intermediate output from $teefile2");
 
-    is($outdata,"POIUYTREWQ\n","expected output");
+    is($outdata,"POIUYTREWQ\n","expected output (POIUYTREWQ)");
 };
 
 1;
