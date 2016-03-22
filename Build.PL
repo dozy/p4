@@ -60,6 +60,7 @@ my $builder = $class->new(
 
   'build_requires' => {
     'English'               => 0,
+    'JSON'                  => 0,
     'Test::More'            => 0,
     'Test::Compile'         => 0,
     'Test::Cmd'             => 0,
