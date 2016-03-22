@@ -46,13 +46,12 @@ my $s = read_file($cfg_file_name, binmode => ':utf8' );
 
 my $cfg = from_json($s);
 
-my %all_nodes = (map { $_->{id} => $_ } @{$cfg->{nodes}});
-
 ###############################################
 # insert any tees requested into the main graph
 ###############################################
 process_tee_list($tee_list, $cfg);
 
+my %all_nodes = (map { $_->{id} => $_ } @{$cfg->{nodes}});
 my $edges = $cfg->{edges};
 
 my %exec_nodes = (map { $_->{id} => $_ } (grep { $_->{type} eq q[EXEC]; } @{$cfg->{nodes}}));
