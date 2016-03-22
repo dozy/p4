@@ -62,7 +62,9 @@ subtest 'test simple graph siphoning off output from one node to a temporary fil
     plan tests => 5;
     my $teefile1 = q[teefile1.txt];
 
-    my $exit_status = $test->run(chdir => $test_curdir, args => "-s -x -t cap=$teefile1 $graph_file");
+    my $args_str = sprintf q[-s -x -t cap=%s %s], $teefile1, $graph_file;
+#   my $exit_status = $test->run(chdir => $test_curdir, args => "-s -x -t cap=$teefile1 $graph_file");
+    my $exit_status = $test->run(chdir => $test_curdir, args => $args_str);
     ok($exit_status>>8 == 0, "non-zero exit for test: $exit_status");
 
     my $outdata;
