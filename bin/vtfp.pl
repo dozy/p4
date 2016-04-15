@@ -34,6 +34,11 @@ Readonly::Scalar my $EWI_INFO => 1;
 Readonly::Scalar my $EWI_WARNING => 2;
 Readonly::Scalar my $EWI_ERROR => 3;
 
+Readonly::Scalar my $SPLICE => 0;
+Readonly::Scalar my $PRUNE => 1;
+Readonly::Scalar my $SRC => 0;
+Readonly::Scalar my $DST => 1;
+
 Readonly::Scalar my $MIN_TEMPLATE_VERSION => 1;
 
 my $progname = (fileparse($0))[0];
@@ -43,6 +48,8 @@ my $help;
 my $strict_checks;
 my $outname;
 my $export_param_vals; # file to export params_vals to
+my $splice_list;
+my $prune_list;
 my $template_path;
 my $logfile;
 my $verbosity_level;
@@ -52,7 +59,7 @@ my @param_vals_fns = (); # a list of input file names containing JSON-formatted 
 my @keys = ();
 my @vals = ();
 my @nullkeys = ();
-GetOptions('help' => \$help, 'strict_checks!' => \$strict_checks, 'verbosity_level=i' => \$verbosity_level, 'template_path=s' => \$template_path, 'logfile=s' => \$logfile, 'outname:s' => \$outname, 'query_mode!' => \$query_mode, 'param_vals=s' => \@param_vals_fns, 'keys=s' => \@keys, 'values|vals=s' => \@vals, 'nullkeys=s' => \@nullkeys, 'export_param_vals:s' => \$export_param_vals, 'absolute_program_paths!' => \$absolute_program_paths);
+GetOptions('help' => \$help, 'strict_checks!' => \$strict_checks, 'verbosity_level=i' => \$verbosity_level, 'template_path=s' => \$template_path, 'logfile=s' => \$logfile, 'outname:s' => \$outname, 'query_mode!' => \$query_mode, 'param_vals=s' => \@param_vals_fns, 'keys=s' => \@keys, 'values|vals=s' => \@vals, 'nullkeys=s' => \@nullkeys, 'export_param_vals:s' => \$export_param_vals, 'splice_nodes=s' => \$splice_list, 'prune_nodes=s' => \$prune_list, 'absolute_program_paths!' => \$absolute_program_paths);
 
 if($help) {
 	croak q[Usage: ], $progname, q{ [-h] [-q] [-s] [-l <log_file>] [-o <output_config_name>] [-v <verbose_level>] [-keys <key> -vals <val> ...]  <viv_template>};
@@ -97,6 +104,10 @@ my $node_tree = process_vtnode(q[], $vtf_name, q[], $params, $globals);    # rec
 if(report_pv_ewi($node_tree, $logger)) { croak qq[Exiting after process_vtnode...\n]; }
 
 my $flat_graph = flatten_tree($node_tree);
+
+if($splice_list or $prune_list) {
+	$flat_graph = splice_nodes($flat_graph, $splice_list, $prune_list);
+}
 
 foreach my $node_with_cmd ( grep {$_->{'cmd'}} @{$flat_graph->{'nodes'}}) {
 
@@ -921,7 +932,7 @@ sub subgraph_to_flat_graph {
 
 			# do check for existence of port in 
 			if(get_child_prefix($tree_node->{children}, $port)) { # if there is a child prefix, this belongs to a subgraph - don't prefix it
-				$edge->{from} = $port;
+				$edge->{from} = $port;L
 			}
 			else {
 				$edge->{from} = sprintf "%s%s", $tree_node->{node_prefix}, $port;
@@ -942,6 +953,354 @@ sub get_child_prefix {
 	my $child = (grep { $edge_to =~ /^$_->{id}:?(.*)$/} @$children)[0];
 
 	return $child? $child->{node_prefix}: q[];
+}
+
+
+sub splice_nodes {
+	my ($flat_graph, $splice_list, $prune_list) = @_;
+	my $splice_candidates = { cull_nodes => [], replacement_edges = [], prune_edges => [], frontier => [], };
+
+	$splice_candidates = register_splice_pairs_process_pass1($flat_graph, $splice_nodes, $SPLICE, $splice_candidates);
+	$splice_candidates = register_splice_pairs_process_pass1($flat_graph, $prune_nodes, $PRUNE, $splice_candidates);
+
+	$flat_graph = splice_nodes($flat_graph, $splice_nodes, $SPLICE);
+	$flat_graph = splice_nodes($flat_graph, $prune_nodes, $PRUNE);
+
+	return $flat_graph;
+}
+
+# splice_pairs_process_pass1:
+#  Initial processing of splice/prune node pairs. Identify set of nodes and edges to be removed and
+#   create new edges. The new edges will later be added (splice) or used to identify input/output
+#   node ports to be removed (prune).
+#
+#   splice_node entry:
+#    src_port
+#    dst_port (possibly null - if so, src_port should be removed)
+#
+sub register_splice_pairs_process_pass1 {
+	my ($flat_graph, $splice_nodes, $splice_type, $splice_candidates) = @_;
+	my (@frontier, %preserve_nodes, %cull_nodes,);
+#	my $splice_candidates = { cull_nodes => [], replacement_edges = [], prune_edges => [], frontier => [], };
+
+	# initialise splice_candidates attributes if required
+	$splice_candidates->{$_} ||= [] for qw{cull_nodes candidate_edges prune_edges frontier};
+
+	my $edge_list = (splice_type == $SPLICE)? $splice_candidates->{candidate_edges} : $splice_candidates->{prune_edges};
+	my $frontier = $splice_candidates->{frontier};
+
+	for my $splice_pair (@{$splice_nodes}) {
+
+		# resolve ports
+		my $frsp = resolve_ports($splice_pair, $flat_graph);
+
+		# note: entries in splice_nodes should be fully resolved to port-level (for src at least)
+
+		# TODO: create candidate edge or pruning edge as appropriate
+		my $from = $frsp->{src}->{node}->{id} . (defined $frsp->{src}->{port} ? ":$frsp->{src}->{port}" : "");
+		my $to = $frsp->{dst}->{node}->{id} . (defined $frsp->{dst}->{port} ? ":$frsp->{dst}->{port}" : "");
+		# my $new_edge = { id => $frsp->{src}->{node}->{id}, from => $frsp->{src}->{port}, to => };
+		# push @{$edge_list}, $new_edge;
+		
+		$preserve_nodes{$frsp->{src}->{node}->{id}} = 1;
+		if($frsp->{dst}) { $preserve_nodes{$frsp->{dst}->{node}->{id}} = 1; }
+
+		if(not any { $_->{node}->{id} eq $frsp->{pioneer}->{node}->{id} } @{$frontier}) { # avoid duplicate node entries in frontier stack
+			push @{$frontier}, $frsp->{pioneer};
+		}
+	}
+
+	return $splice_candidates;
+}
+
+sub prepare_cull {
+	my ($flat_graph, $splice_nodes, $splice_type, $splice_candidates) = @_;
+	my @frontier = @{$splice_candidates->{frontier}};
+
+	# traverse relevant parts of the graph to identify nodes and edges to be removed
+	while(@frontier) {
+		my $node_edges = pop @frontier;
+		my $node_id = $node_edges->{node}->{id};
+
+		next if ($cull_nodes{$node_id} or $preserve_nodes{$node_id}); # this node already traversed or is marked for preservation
+
+		$cull_nodes{$node_id} = 1; # would counting times seen be of use?
+
+		for my $out_edge (@{$node_edges->{all_edges}->{out}}) {
+			# add edge to cull_edges
+			my $edge_label = $out_edge->{id};
+			if(not $edge_label) { # probably a general requirement for unique edge IDs should be generally enforced
+				$edge_label = $out_edge->{id} = join q/_/, ($out_edge->{from}, $out_edge->{to}); #???
+			}
+			$cull_edges{$edge_label}++;
+
+			# add edge.to to frontier (if not in preserve_nodes [???])
+			my ($to_node) = (split q[:], $out_edge->{to});
+			push @frontier, get_node_edges($to_node);
+		}
+	}
+
+	$ret->{cull_nodes} = \%cull_nodes;
+	$ret->{candidate_edges} = \@candidate_edges;
+	$ret = { cull_nodes => [], candidate_edges = [], prune_edges => [], };
+
+	return $ret;
+}
+
+# splice_nodes:
+#  actually perform the slicing or pruning
+#
+#   splice_node entry:
+#    src_port
+#    dst_port (possibly null - if so, src_port should be removed)
+#
+sub splice_or_prune_nodes {
+	my ($flat_graph, $splice_nodes, $splice_type) = @_;
+	my (@frontier, %preserve_nodes, %cull_nodes,);
+
+	for my $splice_pair (@{$splice_nodes}) {
+
+		# resolve ports
+		my $frsp = resolve_ports($splice_pair, $flat_graph);
+
+		# note: entries in splice_nodes should be fully resolved to port-level (for src at least)
+
+		# TODO: create candidate edge or pruning edge as appropriate
+		# my $new_edge = { id => $frsp->{src}->{node}->{id}, from => $frsp->{src}->{port}, to => };
+		# if($splice_type == $PRUNE) { push @prune_edges, $new_edge; }
+		# else { push @candidate_edges, $new_edge; }
+		
+		$preserve_nodes{$frsp->{src}->{node}->{id}} = 1;
+		if($frsp->{dst}) { $preserve_nodes{$frsp->{dst}->{node}->{id}} = 1; }
+
+		push @frontier, $frsp->{pioneer};
+
+		# traverse relevant parts of the graph to identify nodes and edges to be removed
+		while(@frontier) {
+			my $node_edges = pop @frontier;
+			my $node_id = $node_edges->{node}->{id};
+
+			next if ($cull_nodes{$node_id} or $preserve_nodes{$node_id}); # this node already traversed or is marked for preservation
+
+			$cull_nodes{$node_id} = 1; # would counting times seen be of use?
+
+			for my $out_edge (@{$node_edges->{all_edges}->{out}}) {
+				# add edge to cull_edges
+				my $edge_label = $out_edge->{id};
+				if(not $edge_label) { # probably a general requirement for unique edge IDs should be generally enforced
+					$edge_label = $out_edge->{id} = join q/_/, ($out_edge->{from}, $out_edge->{to}); #???
+				}
+				$cull_edges{$edge_label}++;
+
+				# add edge.to to frontier (if not in preserve_nodes [???])
+				my $to_node = (split q[:], $out_edge->{to})[0];
+				push @frontier, get_node_edges($to_node);
+			}
+		}
+	}
+
+	##########################################################################################################################
+	# TODO: Validate
+	#  1. all inports for nodes in cull_nodes originate in either cull_nodes or preserve_nodes
+	#  2. candidate edges have both or neither ends terminating in cull_nodes (both is maybe odd - they should be disregarded)
+	#  3. all edge termini are unique (over candidate and pruning edges)
+	##########################################################################################################################
+
+	# remove from flat_graph the nodes whose ids are in cull_nodes
+	$flat_graph->{nodes} = [ (grep { not $cull_nodes{$_->{id}} } @{$flat_graph->{nodes}}) ];
+
+	# remove from flat_graph the edges whose ids are in cull_edges
+	$flat_graph->{edges} = [ (grep { not $cull_edges{$_->{id}} } @{$flat_graph->{edges}}) ];
+
+	# add new edges, remove pruned ports (don't forget the magic stdin src node)
+	push @{$flat_graph->{edges}}, @candidate_edges;
+	for my $prune_edge (@prune_edges) {
+		remove_port($prune_edge->{from}, $SRC, $flat_graph);
+		remove_port($prune_edge->{to}, $DST, $flat_graph);
+	}
+
+	return $flat_graph;
+}
+
+#
+# resolve_ports:
+#  given a splice_pair specification (from command-line), fully determine the source port and (optionally?) the
+#  destination port, and confirm that they exist in the graph. Source node_id is the only required value, other
+#  values can be derived
+#
+#  Returns:
+#   {
+#     src => {
+#       node => { # node info from graph # },
+#       port => <port name>,
+#       all_edges => {
+#                  in => [ # list of inbound edges ],
+#                  out => [ # list of outbound edges ],
+#       }
+#     },
+#     pioneer => { # successor node to src node:port, first in frontier # },
+#     dst => { # optional destination
+#       node => { # node info from graph # },
+#       port => <port name>,
+#       all_edges => {
+#                  in => [ # list of inbound edges ],
+#                  out => [ # list of outbound edges ],
+#       }
+#     },
+#   }
+#
+sub resolve_ports {
+	my ($splice_pair, $flat_graph) = @_;
+	my $ret = { src => {}, dst => {} };
+
+	# use -1 argument for split to distinguish between "a" (node a) and "a-" (a and downstream nodes)
+	my ($src_spec, $dst_spec) = (split q/-/, $splice_pair, -1);
+
+	unless($src_spec) { croak q[No src spec in splice pair: ], $splice_pair; }
+
+	##################
+	# Process src spec
+	##################
+	# use -1 argument for split to distinguish between "a" (node a) and "a:" (STDOUT of node a)
+	my ($node_id, $port) = (split q/:/, $src_spec, -1);
+
+	my $node_edges = get_node_edges($node_id, $flat_graph); # fetch node and its in and out edges
+	if(not $node_edges) { croak q[no node ], $node_id, q[ found when searching for ports info]; }
+	if(not defined $port) {
+		# if port in src of splice pair is not explicitly named, actual source port is the one that uniquely supplies this node. This source must be unambiguous.
+
+		if(@{$node_edges->{all_edges}->{in}} > 1) { croak q[Splicing error, node ], $node_id, q[ node must have only one inport when implicit, found inports ], join q/,/, (map { $_->{from} } @{$node_edges->{in}}); }
+		if(@{$node_ports->{all_edges}->{in}} < 1 and not node_edges->{node}->{use_STDIN}) { croak q[Splicing error, node ], $node_id, q[ node must have one inport (unless use_STDIN is true) when implicit, but no inports found]; }
+
+		$ret->{pioneer} = $node_edges;
+		if(@{$node_edges->{all_edges}->{in}->[0]->{from}} > 0) {
+			($node_id, $port) = (split q/:/, $node_edges->{all_edges}->{in}->[0]->{from}, -1);
+			$node_edges = get_node_edges($node_id, $flat_graph);
+		}
+		else { # source is STDIN
+#			MAGIC STDIN SRC NODE (?!)
+			croak q[resolve_ports: stdin source port not yet implemented];
+		}
+
+	}
+	else {
+		# make sure the named port actually exists on this node
+		if($port and not any { $_ eq $port } map { (split q/:/, $_)[1] } @{$node_edges->{all_edges}->{out}}) { croak q[port ], $port, q[ is not a port of node ], $node_id; }
+		# if port name is q[], STDOUT is implied. Is this possible for this node?
+		if(not $port and not $node_edges->{node}->{use_STDOUT}) { croak q[port not specified by name, but use_STDOUT is false for node ], $node_id; }
+
+		my $from_id = $node_id . ($port ? ":$port" : "");
+		my $pioneer_target = (grep { $_->{from} eq $from_id } @{$node_edges->{all_edges}->{in}})[0]->{to};
+###		if(not $pioneer_target) { croak q[Failed to find downstream node for output from ], $from_id; }  # this may be too strict
+		if(not $pioneer_target) {
+			carp q[Failed to find downstream node for output from ], $from_id, q[, so assuming;
+		}
+		my ($pioneer_node_id, $pioneer_port) = split q/:/, $pioneer_target, -1;  # not interested in the port (at this time)
+		ret->{pioneer} = get_node_edges($pioneer_node_id, $flat_graph);
+	}
+	$ret->{src} = $node_edges;
+	$ret->{src}->{port} = $port; # is this correct for all cases?
+
+	###########################
+	# Process optional dst spec
+	###########################
+	if($dst_spec) {
+		my ($node_id, $port) = (split q/:/, $dst_spec, -1);
+
+		$node_edges = get_node_edges($node_id, $flat_graph); # fetch node and its in and out ports
+		if(not $node_edges) { croak q[no node ], $node_id, q[ found when searching for ports info]; }
+		if(not defined $port) {
+			# if port in dst of splice pair is not explicitly named, actual destination port is the unique outport for this node. This output destination must be unambiguous.
+
+			if(@{$node_edges->{all_edges}->{out}} > 1) { croak q[Splicing error, node ], $node_id, q[ node must have only one outport when implicit, found outports ], join q/,/, map { $_->{to} } @{$node_edges->{all_edges}->{out}}; }
+			if(@{$node_edges->{all_edges}->{out}} < 1 and not $node_edges->{node}->{use_STDOUT}) { croak q[Splicing error, node ], $node_id, q[ node must have one outport (unless use_STDOUT is true) when implicit, but no outports found]; }
+
+			($node_id, $port) = (split q/:/, $node_edges->{all_edges}->{out}->[0]->{to}, -1);
+			$node_edges = get_node_edges($node_id, $flat_graph);
+		}
+		else {
+			# make sure the named port actually exists on this node
+			if($port and not any { $_ eq $port } @{$node_edges->{all_edges}->{in}}) { croak q[port ], $port, q[ is not a port of node ], $node_id; }
+			# if port name is q[], STDOUT is implied. Is this possible for this node?
+			if(not $port and not $node_edges->{node}->{use_STDOUT}) { croak q[port not specified by name, but use_STDOUT is false for node ], $node_id; }
+		}
+		$ret->{dst} = $node_edges;
+		$ret->{dst}->{port} = $port; # is this correct for all cases?
+	}
+	elsif(not defined $dst_spec) { # need to distinguish between q[] and undef: if undef, then the single output target of src node[:port] must be unambiguous
+		my $src_node_edges = $ret->{pioneer};
+		my $node_id = $src_node_edges->{node}->{id};
+		if(@{$src_node_edges->{all_edges}->{out}} > 1) { croak q[Splicing error, node ], $node_id, q[ node must have only one outport when implicit, found outports ], join q/,/, map { $_->{to} } @{$node_edges->{all_edges}->{out}}; }
+		if(@{$src_node_edges->{all_edges}->{out}} < 1 and not node_edges->{node}->{use_STDOUT}) { croak q[Splicing error, node ], $node_id, q[ node must have one outport (unless use_STDOUT is true) when implicit, but no outports found]; }
+
+		($node_id, $port) = (split q/:/, $src_node_edges->{all_edges}->{out}->[0]->{to}, -1);
+		$node_edges = get_node_edges($node_id, $flat_graph);
+		$ret->{dst} = $node_edges;
+		$ret->{dst}->{port} = $port; # is this correct for all cases?
+	}
+	# else when dst is q[], all nodes downstream of src node should be marked for removal (culling)
+
+	return $ret;
+}
+
+sub get_node_edges {
+	my ($node_id, $flat_graph) = @_;
+
+	my $node = (grep { $_->{id} eq $node_id} @{$flat_graph->{nodes}})[0]; # assumption that id is unique
+	return if(not $node);
+
+	my $in_edges = [ (grep { $_->{to} =~ /^$node_id(:|$)/; } @{$flat_graph->{edges}}) ];
+	my $out_edges = [ (grep { $_->{from} =~ /^$node_id(:|$)/; } @{$flat_graph->{edges}}) ];
+
+	return { node => $node, all_edges => { in => $in_edges, out => $out_edges } };
+}
+
+sub remove_port {
+	my ($port_spec, $type, $flat_graph) = @_;
+
+	my ($node_id, $port_name) = (split q[:], $port_spec, 2);
+
+	my $node = grep { $_->id eq $node } @{$flat_graph->{nodes}};
+
+	if($node) {
+
+		if($port_name) {
+			delete_port($port_name, $node);
+		}
+		else {
+			if($type == $SRC) {
+				if(not $node->use_STDOUT) { carp q[Trying to switch off STDOUT in node ], $node_id, q[, but it is already off]; }
+
+				$node->use_STDOUT = JSON::XS:false;
+			}
+			elsif($type == $DST) {
+				if(not $node->use_STDIN) { carp q[Trying to switch off STDIN in node ], $node_id, q[, but it is already off]; }
+
+				$node->use_STDIN = JSON::XS:false;
+			}
+			else {
+				carp q[unrecognised type ], $type, q[ when attempting to remove nameless port];
+			}
+		}
+	}
+	else {
+		carp q[Failed to find node ], $node_id, q[ when removing old ports (maybe node was pruned?)];
+	}
+
+	return;
+}
+
+sub delete_port {
+	my ($port_name, $node) = @_;
+
+	my $cmd = $node->{cmd};
+	for my $cmd_part (ref $cmd eq 'ARRAY' ? @{$cmd}[1..$#{$cmd}] : ($node->{'cmd'})) {
+		return if ($cmd_part =~ s/\Q$port_name\E//smx);
+	} #if link for port has not been made (port never defined, or already substituted, in node cmd) bail out
+
+	carp 'delete_port: node '.($node->{id})." has no port $port_name";
+
+	return;
 }
 
 ######################################################################
