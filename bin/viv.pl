@@ -25,6 +25,8 @@ Readonly::Scalar my $VLMIN => 1;
 Readonly::Scalar my $VLMED => 2;
 Readonly::Scalar my $VLMAX => 3;
 
+my $TEMPLATE_VERSION = 1;
+
 my %opts;
 getopts('xshv:o:r:t:', \%opts);
 
@@ -48,6 +50,8 @@ $tee_list ||= {};
 my $s = read_file($cfg_file_name, binmode => ':utf8' );
 
 my $cfg = from_json($s);
+
+if($cfg->{version}) { $TEMPLATE_VERSION = $cfg->{version}; }
 
 ###############################################
 # insert any tees requested into the main graph
@@ -243,21 +247,46 @@ sub _create_fifo {
 }
 
 sub _update_node_data_xfer {
-	my ($node, $port, $data_xfer_name, $edge_side) = @_;
+	my ($node, $port_name, $data_xfer_name, $edge_side) = @_;
 
 	if($node->{type} eq q[EXEC] and $data_xfer_name ne q[]) {
-		if(defined $port) {
-			if(my($inout) = grep {$_} $port=~/_(IN|OUT)__\z/smx , $port=~/\A__(IN|OUT)_/smx ){ # if port has _{IN,OUT}_ {suf,pre}fix convention
-				#ensure port is connected to in manner suggested by naming convention
-				croak 'Node '.($node->{'id'})." port $port connected as ".($edge_side == $FROM?q("from"):q("to")) if (($inout eq q(OUT))^($edge_side == $FROM));
-			} else {
-				croak 'Node '.($node->{'id'})." has poorly described port $port (no _{IN,OUT}__ {suf,pre}fix)\n";
+		if(defined $port_name) {
+			if($TEMPLATE_VERSION >= 2) {
+				my $port = $node->{io}->{ports}->{$port_name};
+				if(not $port) { croak 'Error: attempt to use undefined port ', $port_name, ' on node ', $node->{id}; }
+				if(not $port->{direction}) { croak 'Error: port direction not specified for port ', $port_name, ' on node ', $node->{id}; }
+				if($edge_side == $FROM and $port->{direction} ne q[out] or $edge_side == $TO and $port->{direction} ne q[in]) {
+					croak 'Error: attempt to connect ', ($edge_side == $FROM?q("from"):q("to")), ' source to ', $port->{direction}, ' port on node ', $node->{id};
+				}
+##				my $cmd = $node->{'cmd'};
+##				if(ref $cmd eq q[ARRAY]) {
+##					$cmd = [ (map { (ref $_ eq q[HASH] and $_->{port} and $_->{port} eq $port_name)? $data_xfer_name : $_ } @{$cmd}) ];
+##				}
+##				$node->{'cmd'} = $cmd;
+				if(ref $node->{cmd} eq q[ARRAY]) {
+					for my $i (0..$#{$node->{cmd}}) {
+						if(ref $node->{cmd}->[$i] eq q[HASH] and $node->{cmd}->[$i]->{packflag}) {
+							$node->{cmd}->[$i]->{packflag} = [ (map { (ref $_ eq q[HASH] and $_->{port} and $_->{port} eq $port_name)? $data_xfer_name : $_ } @{$node->{cmd}->[$i]->{packflag}}) ];
+						}
+						elsif($node->{cmd}->[$i] eq q[HASH] and $node->{cmd}->[$i]->{port} and $node->{cmd}->[$i]->{port} eq $port_name) {
+							$node->{cmd}->[$i] = $data_xfer_name;
+						}
+					}
+				}
 			}
-			my $cmd = $node->{'cmd'};
-			for my$cmd_part ( ref $cmd eq 'ARRAY' ? @{$cmd}[1..$#{$cmd}] : ($node->{'cmd'}) ){
-				return if ($cmd_part =~ s/\Q$port\E/$data_xfer_name/smx);
-			} #if link for port has not been made (port never defined, or already substituted, in node cmd) bail out
-			croak 'Node '.($node->{'id'})." has no port $port";
+			else {
+				if(my($inout) = grep {$_} $port_name=~/_(IN|OUT)__\z/smx , $port_name=~/\A__(IN|OUT)_/smx ){ # if port has _{IN,OUT}_ {suf,pre}fix convention
+					#ensure port is connected to in manner suggested by naming convention
+					croak 'Node '.($node->{'id'})." port $port_name connected as ".($edge_side == $FROM?q("from"):q("to")) if (($inout eq q(OUT))^($edge_side == $FROM));
+				} else {
+					croak 'Node '.($node->{'id'})." has poorly described port $port_name (no _{IN,OUT}__ {suf,pre}fix)\n";
+				}
+				my $cmd = $node->{'cmd'};
+				for my$cmd_part ( ref $cmd eq 'ARRAY' ? @{$cmd}[1..$#{$cmd}] : ($node->{'cmd'}) ){
+					return if ($cmd_part =~ s/\Q$port_name\E/$data_xfer_name/smx);
+				} #if link for port has not been made (port never defined, or already substituted, in node cmd) bail out
+				croak 'Node '.($node->{'id'})." has no port $port_name";
+			}
 		}
 		else {
 			my $node_edge_std = $edge_side == $FROM? q[STDOUT]: q[STDIN];
@@ -303,6 +332,15 @@ sub _fork_off {
 		$cmd = '[' . (join ',',@cmd)  . ']';
 	}
 
+	# special last-minute handling of command flags (for ports embedded in flags)
+#	for my $i (0..$#cmd) {
+#		if(ref $cmd[$i] eq q[HASH] and $cmd[$i]->{packflag}) {
+#			$cmd[$i] = join q//, @{$cmd[$i]->{packflag}};
+#		}
+#	}
+	@cmd = map { (ref $_ eq q[HASH] and $_->{packflag} and ref $_->{packflag} eq q[ARRAY])? join q//, @{$_->{packflag}} : $_ } @cmd;
+	$cmd = '[' . (join ',',@cmd)  . ']';
+
 	if(my $pid=fork) {     # parent - record the child's departure
 		$logger->($VLMED, qq[*** Forked off pid $pid with cmd: $cmd\n]);
 
@@ -317,17 +355,61 @@ sub _fork_off {
 			select(STDERR);$|=1;
 			print STDERR "Process $$ for cmd $cmd:\n";
 			print STDERR ' fileno(STDERR,'.(fileno STDERR).")\n";
-			if(not $node->{use_STDIN}) { $node->{'STDIN'} ||= '/dev/null'; }
-			if($node->{'STDIN'}) {
-				sysopen STDIN, $node->{'STDIN'}, O_RDONLY|O_NONBLOCK or croak "Failed to reset STDIN, pid $$ with cmd: $cmd\n$!";
+
+			my ($sin, $sout);
+			if($TEMPLATE_VERSION >= 2) {
+				if(not $node->{io}->{use_STDIN}) { $node->{io}->{'STDIN'} ||= '/dev/null'; }
+				$sin = $node->{io}->{'STDIN'};
+			}
+			else {
+				if(not $node->{use_STDIN}) { $node->{'STDIN'} ||= '/dev/null'; }
+				$sin = $node->{'STDIN'};
+			}
+
+			if($sin) {
+				sysopen STDIN, $sin, O_RDONLY|O_NONBLOCK or croak "Failed to reset STDIN, pid $$ with cmd: $cmd\n$!";
 				fcntl STDIN, F_SETFL, (fcntl STDIN,F_GETFL,0 or croak "fcntl F_GETFL fail $!")&~O_NONBLOCK or croak "fcntl F_SETFL fail $!" ;
 			}
-			print STDERR ' fileno(STDIN,'.(fileno STDIN).') reading from '.($node->{'STDIN'}?$node->{'STDIN'}:'stdin') ."\n";
-			if(not $node->{use_STDOUT}) { $node->{'STDOUT'} ||= '/dev/null'; }
-			if($node->{'STDOUT'}) {
-				open STDOUT, q(>), $node->{'STDOUT'} or croak "Failed to reset STDOUT, pid $$ with cmd: $cmd";
+			print STDERR ' fileno(STDIN,'.(fileno STDIN).') reading from '.($sin?$sin:'stdin') ."\n";
+
+			if($TEMPLATE_VERSION >= 2) {
+				if(not $node->{io}->{use_STDOUT}) { $node->{io}->{'STDOUT'} ||= '/dev/null'; }
+				$sout = $node->{io}->{'STDOUT'};
 			}
-			print STDERR ' fileno(STDOUT,'.(fileno STDOUT).') writing to '.($node->{'STDOUT'}?$node->{'STDOUT'}:'stdout') ."\n";
+			else {
+				if(not $node->{use_STDOUT}) { $node->{'STDOUT'} ||= '/dev/null'; }
+				$sout = $node->{'STDOUT'};
+			}
+			if($sout) {
+				open STDOUT, q(>), $sout or croak "Failed to reset STDOUT, pid $$ with cmd: $cmd";
+			}
+			print STDERR ' fileno(STDOUT,'.(fileno STDOUT).') writing to '.($sout?$sout:'stdout') ."\n";
+
+##################
+##################
+##################
+##			if(not $node->{use_STDIN}) { $node->{'STDIN'} ||= '/dev/null'; }
+#			if(not $node->{io}->{use_STDIN}) { $node->{io}->{'STDIN'} ||= '/dev/null'; }
+##			if($node->{'STDIN'}) {
+#			if($node->{io}->{'STDIN'}) {
+##				sysopen STDIN, $node->{'STDIN'}, O_RDONLY|O_NONBLOCK or croak "Failed to reset STDIN, pid $$ with cmd: $cmd\n$!";
+#				sysopen STDIN, $node->{io}->{'STDIN'}, O_RDONLY|O_NONBLOCK or croak "Failed to reset STDIN, pid $$ with cmd: $cmd\n$!";
+#				fcntl STDIN, F_SETFL, (fcntl STDIN,F_GETFL,0 or croak "fcntl F_GETFL fail $!")&~O_NONBLOCK or croak "fcntl F_SETFL fail $!" ;
+#			}
+##			print STDERR ' fileno(STDIN,'.(fileno STDIN).') reading from '.($node->{'STDIN'}?$node->{'STDIN'}:'stdin') ."\n";
+#			print STDERR ' fileno(STDIN,'.(fileno STDIN).') reading from '.($node->{io}->{'STDIN'}?$node->{io}->{'STDIN'}:'stdin') ."\n";
+##			if(not $node->{use_STDOUT}) { $node->{'STDOUT'} ||= '/dev/null'; }
+#			if(not $node->{io}->{use_STDOUT}) { $node->{io}->{'STDOUT'} ||= '/dev/null'; }
+##			if($node->{'STDOUT'}) {
+#			if($node->{io}->{'STDOUT'}) {
+##				open STDOUT, q(>), $node->{'STDOUT'} or croak "Failed to reset STDOUT, pid $$ with cmd: $cmd";
+#				open STDOUT, q(>), $node->{io}->{'STDOUT'} or croak "Failed to reset STDOUT, pid $$ with cmd: $cmd";
+#			}
+##			print STDERR ' fileno(STDOUT,'.(fileno STDOUT).') writing to '.($node->{'STDOUT'}?$node->{'STDOUT'}:'stdout') ."\n";
+#			print STDERR ' fileno(STDOUT,'.(fileno STDOUT).') writing to '.($node->{io}->{'STDOUT'}?$node->{io}->{'STDOUT'}:'stdout') ."\n";
+##################
+##################
+##################
 			print STDERR ' select waiting on STDIN' ."\n";
 			my$rin="";vec($rin,fileno(STDIN),1)=1; select($rin,undef,undef,undef);
 			$logger->($VLMED, qq[Child $$ execing]);
@@ -444,7 +526,8 @@ sub process_tee_list {
 			carp q[Failed to create id for tee node for port ], $outport;
 			next;
 		}
-		my $tee_node = { id => $tnid, type => q[EXEC], use_STDIN => JSON::true, use_STDOUT => JSON::true, cmd => [ 'tee', $tee_stream_outport_name, ], };
+#		my $tee_node = { id => $tnid, type => q[EXEC], use_STDIN => JSON::true, use_STDOUT => JSON::true, cmd => [ 'tee', $tee_stream_outport_name, ], };
+		my $tee_node = { id => $tnid, type => q[EXEC], io => { use_STDIN => JSON::true, use_STDOUT => JSON::true}, cmd => [ 'tee', $tee_stream_outport_name, ], };
 
 		#########################
 		# create output file node
