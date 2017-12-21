@@ -15,9 +15,8 @@ my $graph_file = $tdir . q[/input.json];
 my $infile = q[indata.txt];
 my $outfile = q[mainout.txt];
 
-# packflag directive should resolve to a string argument for the -c flag ('3,5,7,9,10-12,17,18')
-#  Note: this is a simple illustration - packflag is normally intended to pack port FIFOs into a string
-#  immediately before execution
+# STRINGIFY subtype for an EXEC node forces conversion of command to string before exec to force 
+#  execution via comand shell interpreter when shell metacharacters are present
 my $graph = {
 	version => '2.0',
 	nodes => [
@@ -29,7 +28,7 @@ my $graph = {
 my $test = Test::Cmd->new( prog => $odir.'/bin/viv.pl', workdir => q());
 ok($test, 'made test object');
 
-subtest 'test packflag directive' => sub {
+subtest 'test stringify subtype' => sub {
     plan tests => 4;
 
     local $ENV{TESTPAR} = q[TEST_VALUE];

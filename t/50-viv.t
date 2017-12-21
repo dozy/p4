@@ -23,7 +23,6 @@ foreach(
   my($vtf, $estatus, $eerror)=@$_;
   my$exit_status = $test->run(chdir => $test->curdir, args => "-s -x $odir/t/data/$vtf");
   cmp_ok($exit_status>>8, q(==), $estatus, "expected exit status of $estatus for $vtf");
-#print ">>>> ", $test->stderr;
   like($test->stderr,qr(\Q$eerror\E)smx, "expected err info for $vtf");
 }
 

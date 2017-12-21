@@ -347,9 +347,9 @@ sub _process_edge {
 
 	# from port - check validity; previous edges? if so, compatible type (fifo/file)? check other end of previous edge to make sure not many:many creation
 	my $existing_from_edge = $port_list{$from_id}->{$from_port};
-	if(exists $existing_from_edge->{dst} and @{$existing_from_edge->{dst}} > 0) { # an edge from this port already added
+	if(exists $existing_from_edge->{dst} and @{$existing_from_edge->{dst}} > 0) { # an edge from this port already processed
 
-		$data_xfer_name = $existing_from_edge->{data_xfer_name};
+		$data_xfer_name = $existing_from_edge->{data_xfer_name}; # use existing FIFO/file (unless many:many error detected)
 
 		# confirm connection type match
 		if($connection_type ne $existing_from_edge->{connection_type}) {
@@ -358,35 +358,14 @@ sub _process_edge {
 		}
 
 		# check for many:many creation
-		my $dst_count = $existing_from_edge->{dst}? @{$existing_from_edge->{dst}}: 0;
-		if($dst_count == 1) {
-			my ($other_dst_id, $other_dst_port) = ($existing_from_edge->{dst}->[0]->{id}, $existing_from_edge->{dst}->[0]->{port});
-			my $other_dst = $port_list{$other_dst_id}->{$other_dst_port};
-			if(@{$other_dst->{src}} > 1) {
-				$severity = ($TEMPLATE_VERSION>=2 and (not $from_node->{tver} or $from_node->{tver} >=2))?1:0;
-				push @{$ms_stack}, {fatal_error => $severity, text => qq[processing edge from $from_id:$from_port to $to_id:$to_port: illegal many:many creation\n]};
-			} 
-		}
-	}
-
-	# to port - check validity; previous edges? if so, compatible type (fifo/file)? check other end of previous edge to make sure not many:many creation
-	my $existing_to_edge = $port_list{$to_id}->{$to_port};
-	if(exists $existing_to_edge->{src} and @{$existing_to_edge->{src}} > 0) { # an edge to this port already added
-
-		# confirm connection type match
-		if($connection_type ne $existing_to_edge->{connection_type}) {
-			$severity = ($TEMPLATE_VERSION>=2 and (not $to_node->{tver} or $to_node->{tver} >=2))?1:0;
-			push @{$ms_stack}, {fatal_error => $severity, text => qq[multiple edges to port have inconsistent connection types (pipe/file); from: $from_node->{id}, to: $to_node->{id}\n]};
-		}
-
-		# check for many:many creation
-		my $src_count = $existing_to_edge->{src}? @{$existing_to_edge->{src}}: 0;
-		if($src_count == 1) {
-			my ($other_src_id, $other_src_port) = ($existing_to_edge->{src}->[0]->{id}, $existing_to_edge->{src}->[0]->{port});
-			my $other_src = $port_list{$other_src_id}->{$other_src_port};
-			if(@{$other_src->{dst}} > 1) {
-				$severity = ($TEMPLATE_VERSION>=2 and (not $to_node->{tver} or $to_node->{tver} >=2))?1:0;
-				push @{$ms_stack}, {fatal_error => $severity, text => qq[processing edge from $from_id:$from_port to $to_id:$to_port: illegal many:many creation\n]};
+		for my $dst_port ({id => $to_id, port => $to_port}, @{$existing_from_edge->{dst}}) {
+			my $other_dst = $port_list{$dst_port->{id}}->{$dst_port->{port}};
+			if($other_dst->{src} and @{$other_dst->{src}} > 0) {
+				$severity = ($TEMPLATE_VERSION>=2 and (not $from_node->{tver} or $from_node->{tver} >= 2))?1:0;
+				push @{$ms_stack}, {fatal_error => $severity, text => qq[processing edge from $from_id:$from_port to $to_id:$to_port: illegal many:many creation, alternate input source(s) ] .
+					join(";", map { $_->{id} . ":" . $_->{port} } (@{$other_dst->{src}})) .
+					qq[ to $to_id:$to_port\n]};
+				last;
 			} 
 		}
 	}
