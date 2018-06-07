@@ -66,19 +66,14 @@
 ],
 "nodes":[
 	{
-		"id":"src_bam",
-		"type":"INFILE",
-		"name":{
-			"subst":"src_bam",
-			"required":"yes",
-			"ifnull":{
-				"subst_constructor":{
-					"vals":[ {"subst":"indatadir"}, "/", {"subst":"rpt"}, ".bam" ],
-					"postproc":{"op":"concat", "pad":""}
-				}
-			}
-		},
-		"description":"BAM using as input to this pipeline - expected to already contain PhiX (normally from hyb buffer spike-in) alignments"
+		"id":"crammerge",
+		"type":"EXEC",
+		"use_STDIN": false,
+		"use_STDOUT": true,
+		"orig_cmd":{"subst":"crammerge"},
+		"old_cmd": [ "bammerge", "level=0", "SO=coordinate", "inputformat=cram", "outputformat=bam", {"subst":"incrams"} ],
+		"cmd": [ "bamcat", "level=0", "inputformat=cram", "outputformat=bam", {"subst":"incrams"} ],
+		"description":"merge individual cram files from a sample into one cram file"
 	},
 	{
 		"id":"spatial_filter",
@@ -92,7 +87,7 @@
 			"--compression-level", "0",
 			"-f",
 			"-l", {"port":"apply_stats", "direction":"out"},
-			"-F", {"port":"filter", "direction":"in"},
+			"-F", {"subst":"s2_filter_files", "required":true},
 			"/dev/stdin"
 		],
 		"description":"apply the spatial filter (produced in stage1)"
@@ -194,8 +189,7 @@
 	}
 ],
 "edges":[
-	{ "id":"src_to_bc2", "from":"src_bam", "to":"spatial_filter" },
-	{ "id":"src_to_bc2", "from":"spatial_filter_file", "to":"spatial_filter:filter" },
+	{ "id":"src_to_bc2", "from":"crammerge", "to":"spatial_filter" },
 	{ "id":"apply_filter_to_sfqc", "from":"spatial_filter:apply_stats", "to":"spatial_filter_stats" },
 	{ "id":"sf_to_bc2", "from":"spatial_filter", "to":"subsample_fqc" },
 	{ "id":"ssfqc_to_tgtaln", "from":"subsample_fqc:straight_through1", "to":"target_alignment" },
