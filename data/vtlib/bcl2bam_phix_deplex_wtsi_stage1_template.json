@@ -75,7 +75,7 @@
 		"comment":"flag will disappear unless scramble_reference_fasta value is given (allows unaligned cram)",
 		"subst_constructor":{ "vals":[ "--reference", {"subst":"scramble_reference_fasta"} ] }
 	},
-	{"id":"s1_split_output_format_val", "description":"output format for deplexed reads (bam/cram/etc)", "default":"cram"}
+	{"id":"s1_split_output_format_val", "description":"output format for deplexed reads (bam/cram/etc)", "default":"bam"}
 ],
 "nodes":[
 	{
