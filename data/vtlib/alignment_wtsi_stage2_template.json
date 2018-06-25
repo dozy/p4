@@ -110,7 +110,7 @@
 			"-l", {"port":"apply_stats", "direction":"out"},
 			"-F", {"subst":"s2_filter_files", "required":true},
 			{"subst":"spatial_filter_rg_flag"},
-			"/dev/stdin"
+			"-"
 		],
 		"description":"apply the spatial filter (produced in stage1)"
 	},
