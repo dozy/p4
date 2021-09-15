@@ -73,6 +73,9 @@
 	{"id":"c2a_list","required":true,"default":["target"]},
 	{"id":"c2a_target","required":"no","default":{"select":"c2a_list", "allow_unspec_keys":true, "default":"deflt", "cases":{"target":"on","deflt":"off"}}},
 	{"id":"c2a_phix","required":"no","default":{"select":"c2a_list", "allow_unspec_keys":true, "default":"deflt", "cases":{"phix":"on", "deflt":"off"}}}
+	{"id":"haplotag_list","required":true,"default":[]},
+	{"id":"haplotag_target","required":"no","default":{"select":"haplotag_list", "allow_unspec_keys":true, "default":"deflt", "cases":{"target":"on","deflt":"off"}}},
+	{"id":"haplotag_phix","required":"no","default":{"select":"haplotag_list", "allow_unspec_keys":true, "default":"deflt", "cases":{"phix":"on", "deflt":"off"}}}
 ],
 "nodes":[
 	{
@@ -187,7 +190,7 @@
                 "type":"VTFILE",
 		"comment":"inputs: _stdin_ (bam); outputs: _stdout_ (seqchksum)",
 		"node_prefix":"foptgt_",
-                "subst_map":{"phix_or_target":{"subst":"target_indicator"},"fopid":{"subst":"fopid_tgt"},"c2a_switch":{"subst":"c2a_target"},"bstmp":"bsfopt","brtmp":"brfopt","bmdtmp":"bmdfopt","scramble_reference_fasta":{"subst":"reference_genome_fasta"}},
+                "subst_map":{"phix_or_target":{"subst":"target_indicator"},"fopid":{"subst":"fopid_tgt"},"c2a_switch":{"subst":"c2a_target"},"haplotag_switch":{"subst":"haplotag_target"},"bstmp":"bsfopt","brtmp":"brfopt","bmdtmp":"bmdfopt","scramble_reference_fasta":{"subst":"reference_genome_fasta"}},
                 "name":{"subst":"final_output_prep_target"},
                 "description":"subgraph containing post alignment_filter process (target)"
         },
@@ -196,7 +199,7 @@
                 "type":"VTFILE",
 		"comment":"inputs: _stdin_ (bam); outputs: _stdout_ (seqchksum)",
 		"node_prefix":"fopphx_",
-                "subst_map":{"phix_or_target":{"subst":"phix_indicator"},"fopid":{"subst":"fopid_phix"},"c2a_switch":{"subst":"c2a_phix"},"bstmp":"bsfopp","brtmp":"brfopp","bmdtmp":"bmdfopp","scramble_reference_fasta":{"subst":"phix_reference_genome_fasta"}},
+                "subst_map":{"phix_or_target":{"subst":"phix_indicator"},"fopid":{"subst":"fopid_phix"},"c2a_switch":{"subst":"c2a_phix"},"haplotag_switch":{"subst":"haplotag_phix"},"bstmp":"bsfopp","brtmp":"brfopp","bmdtmp":"bmdfopp","scramble_reference_fasta":{"subst":"phix_reference_genome_fasta"}},
                 "name":{"subst":"final_output_prep_phix"},
                 "description":"subgraph containing post alignment_filter process (phix)"
         },
