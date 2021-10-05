@@ -41,6 +41,23 @@
 		"comment":"ensure BAM records are gathered by template i.e. queryname"
 	},
 	{
+		"id":"haplotag",
+		"description":"haplotagging post-processing",
+		"type":{
+			"select":"haplotag_processing",
+			"required":true,
+			"select_range":[1],
+			"default":"off",
+			"cases":{
+				"on":"VTFILE",
+				"off":"INACTIVE"
+			}
+		},
+		"comment":"inputs: _stdin_ (bam)",
+		"node_prefix":{ "subst_constructor":{ "vals": [ "ht_", {"subst":"phix_or_target", "ifnull":"pot"}, "_" ], "postproc":{"op":"concat", "pad":""} } },
+		"name":"haplotagging.json"
+	},
+	{
 		"id":"tee3",
 		"type":"VTFILE",
 		"node_prefix":"tee3_",
@@ -164,7 +181,17 @@
 	}
 ],
 "edges":[
-	{ "id":"bc2_to_t3", "from":"bamcollate2", "to":"tee3" },
+	{
+	"select":"haplotag_switch", "required":true, "select_range":[1], "default":"off",
+	"cases":{
+		"on": [
+			{ "id":"markdup_to_multiway", "from":"bamcollate2", "to":"haplotag" },
+			{ "id":"markdup_to_multiway", "from":"haplotag", "to":"tee3" }
+		],
+		"off": { "id":"bc2_to_t3", "from":"bamcollate2", "to":"tee3" }
+		}
+	},
+
 	{ "id":"phixaln_to_amp", "from":"tee3:amp", "to":"auxmerge_prep" },
 	{ "id":"amp_to_auxmrg", "from":"auxmerge_prep", "to":"bam12auxmerge:no_aln_bam" },
 	{ "id":"tgtaln_to_prealn", "from":"tee3:prealn", "to":"pre_alignment" },
