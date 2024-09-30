@@ -24,6 +24,7 @@
     "splice": [],
     "prune": [
       "fop[ht].*_bmd_multiway:calibration_pu-",
+      "foptgt_cram_tee:c2a-",
       "fop[ht].*samtools_stats_F0.*_target.*-",
       "fop[ht].*samtools_stats_F0.*00_bait.*-",
       "aln_tee4_tee4:to_phix_aln-alignment_filter:phix_bam_in",
