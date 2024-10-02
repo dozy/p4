@@ -109,7 +109,7 @@ RUN curl -sSL -O "https://github.com/lh3/bwa/archive/refs/tags/v${BWA_VERSION}.t
     tar xzvf ./v${BWA_VERSION}.tar.gz && \
     cd ./bwa-${BWA_VERSION} && \
     pwd && \
-    make -j $(nproc) && \
+    make CC='gcc -fcommon' -j $(nproc) && \
     cp ./bwa /usr/local/bin/ && \
     chmod +x /usr/local/bin/bwa && \
     ln -s /usr/local/bin/bwa /usr/local/bin/bwa0_6
