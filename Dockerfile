@@ -106,8 +106,8 @@ RUN curl -sSL -O "https://github.com/samtools/samtools/releases/download/${SAMTO
 
 ARG BWA_VERSION
 RUN curl -sSL -O "https://github.com/lh3/bwa/archive/refs/tags/v${BWA_VERSION}.tar.gz" && \
-    tar xzvf v${BWA_VERSION}.tar.gz && \
-    cd bwa-${BWA_VERSION} && \
+    tar xzvf ./v${BWA_VERSION}.tar.gz && \
+    cd ./bwa-${BWA_VERSION} && \
     pwd && \
     make -j $(nproc) && \
     cp ./bwa /usr/local/bin/ && \
