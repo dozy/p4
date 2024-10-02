@@ -90,13 +90,6 @@ RUN curl -sSL -O "https://gitlab.com/german.tischler/libmaus2/-/archive/${LIBMAU
     make -j $(nproc) install && \
     ldconfig
 
-ARG BIOBAMBAM2_VERSION
-RUN curl -sSL -O "https://gitlab.com/german.tischler/biobambam2/-/archive/${BIOBAMBAM2_VERSION}/biobambam2-${BIOBAMBAM2_VERSION}.tar.bz2" && \
-    tar xfj biobambam2-${BIOBAMBAM2_VERSION}.tar.bz2 && \
-    cd biobambam2-${BIOBAMBAM2_VERSION} && \
-    ./configure && \
-    make -j $(nproc) install
-
 ARG TEEPOT_VERSION
 RUN curl -sSL -O "https://github.com/wtsi-npg/teepot/releases/download/${TEEPOT_VERSION}/teepot-${TEEPOT_VERSION}.tar.gz" && \
     tar xzf teepot-${TEEPOT_VERSION}.tar.gz && \
@@ -121,8 +114,9 @@ RUN curl -sSL -O "https://github.com/samtools/samtools/releases/download/${SAMTO
 
 ARG BWA_VERSION
 RUN curl -sSL -O "https://github.com/lh3/bwa/archive/refs/tags/v${BWA_VERSION}.tar.gz" && \
-    tar xzf v${BWA_VERSION}.tar.gz && \
+    tar xzvf v${BWA_VERSION}.tar.gz && \
     cd bwa-${BWA_VERSION} && \
+    pwd && \
     make -j $(nproc) && \
     cp ./bwa /usr/local/bin/ && \
     chmod +x /usr/local/bin/bwa && \
@@ -146,6 +140,12 @@ RUN git clone --single-branch --branch="$BAMBI_VERSION" --depth=1 "https://githu
     ./configure && \
     make -j $(nproc) install
 
+ARG BIOBAMBAM2_VERSION
+RUN curl -sSL -O "https://gitlab.com/german.tischler/biobambam2/-/archive/${BIOBAMBAM2_VERSION}/biobambam2-${BIOBAMBAM2_VERSION}.tar.bz2" && \
+    tar xfj biobambam2-${BIOBAMBAM2_VERSION}.tar.bz2 && \
+    cd biobambam2-${BIOBAMBAM2_VERSION} && \
+    ./configure && \
+    make -j $(nproc) install
 
 ARG PCAP_CORE_VERSION
 RUN git clone --single-branch --branch="$PCAP_CORE_VERSION" --depth=1 "https://github.com/cancerit/PCAP-core.git" && \
