@@ -82,14 +82,6 @@ RUN SLUG=$(echo ${IO_LIB_VERSION} | tr '.' '-') && \
     make -j $(nproc) install && \
     ldconfig
 
-ARG LIBMAUS2_VERSION
-RUN curl -sSL -O "https://gitlab.com/german.tischler/libmaus2/-/archive/${LIBMAUS2_VERSION}/libmaus2-${LIBMAUS2_VERSION}.tar.bz2" && \
-    tar xfj libmaus2-${LIBMAUS2_VERSION}.tar.bz2 && \
-    cd libmaus2-${LIBMAUS2_VERSION} && \
-    ./configure --prefix=/usr/local --with-io_lib --with-nettle && \
-    make -j $(nproc) install && \
-    ldconfig
-
 ARG TEEPOT_VERSION
 RUN curl -sSL -O "https://github.com/wtsi-npg/teepot/releases/download/${TEEPOT_VERSION}/teepot-${TEEPOT_VERSION}.tar.gz" && \
     tar xzf teepot-${TEEPOT_VERSION}.tar.gz && \
@@ -139,6 +131,14 @@ RUN git clone --single-branch --branch="$BAMBI_VERSION" --depth=1 "https://githu
     autoreconf -fi && \
     ./configure && \
     make -j $(nproc) install
+
+ARG LIBMAUS2_VERSION
+RUN curl -sSL -O "https://gitlab.com/german.tischler/libmaus2/-/archive/${LIBMAUS2_VERSION}/libmaus2-${LIBMAUS2_VERSION}.tar.bz2" && \
+    tar xfj libmaus2-${LIBMAUS2_VERSION}.tar.bz2 && \
+    cd libmaus2-${LIBMAUS2_VERSION} && \
+    ./configure --prefix=/usr/local --with-io_lib --with-nettle && \
+    make -j $(nproc) install && \
+    ldconfig
 
 ARG BIOBAMBAM2_VERSION
 RUN curl -sSL -O "https://gitlab.com/german.tischler/biobambam2/-/archive/${BIOBAMBAM2_VERSION}/biobambam2-${BIOBAMBAM2_VERSION}.tar.bz2" && \
