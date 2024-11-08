@@ -1,6 +1,7 @@
 {
   "assign": [
     {
+      "stats_reference_flag":null,
       "spatial_filter_switch":"off",
       "markdup_optical_distance_value": "100",
       "s2_se_pe": "pe",
