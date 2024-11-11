@@ -1,7 +1,6 @@
 {
   "assign": [
     {
-      "stats_reference_flag":null,
       "spatial_filter_switch":"off",
       "markdup_optical_distance_value": "100",
       "s2_se_pe": "pe",
@@ -10,8 +9,10 @@
       "markdup_method": "samtools",
       "s2_filter_files": "DUMMY",
       "spatial_filter_file": "DUMMY",
+      "reference_genome_fasta":"DUMMY",
       "phix_reference_genome_fasta":"DUMMY",
-      "realignment_switch":1
+      "realignment_switch":1,
+      "stats_reference_flag":null
     }
   ],
   "assign_local": {},
