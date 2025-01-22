@@ -5,7 +5,7 @@
 	"ports":{
 		"inputs":{
 			"_stdin_":"bamtofastq",
-			"reference":"bwa_mem:db_prefix_reference_genome"
+			"reference":"bowtie2:db_prefix_reference_genome"
 		},
 		"outputs":{
 			"_stdout_":"samtobam"
