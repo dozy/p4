@@ -763,8 +763,8 @@ $logger->($VLMAX, "Checking raf_list\n", Dumper($raf_list), "\n");
 
 $logger->($VLMAX, "  processing raf edge ", Dumper($target_edge), "\n");
 
-		my $new_raf_node = { id => q/new_raf_node/, type => q/RAFILE/, name => $raf_list->{$target_edge_id}};  # TBD: id value should really be unique
-		my $new_edge = { id => '___NEW_RAF_EDGE___', from => $new_raf_node->{id}, to => $target_edge->{to} };	  # TBD: id value should really be unique
+		my $new_raf_node = { id => generate_rand_node_id($cfg->{nodes}, q[new_raf_node_]), type => q/RAFILE/, name => $raf_list->{$target_edge_id}};  # Note: node id values must be unique
+		my $new_edge = { id => '___NEW_RAF_EDGE___', from => $new_raf_node->{id}, to => $target_edge->{to} };	  # TBD: edge id value should really be unique
 		$target_edge->{to} = $new_raf_node->{id};
 
 $logger->($VLMAX, "  created new raf node:\n", Dumper($new_raf_node), "\n");
@@ -776,6 +776,21 @@ $logger->($VLMAX, "  created new raf edge2:\n", Dumper($new_edge), "\n\n");
 	}
 
 	return;
+}
+
+sub generate_random_node_id {
+	my ($nodes, $prefix) = @_;
+
+	my $ret;
+	my $maxtry=100000;
+
+	do {
+		$ret=sprintf "%s%03d", $prefix, int(rand(100000));
+	} while (any { $_->id eq $ret } @{$nodes} and ($maxtry-- > 0));
+
+	if($maxtry <= 0) { croak q[Failed to generate randon node id]; }
+
+	return $ret;
 }
 
 ###################################################################################################################
