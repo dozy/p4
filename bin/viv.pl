@@ -763,7 +763,7 @@ $logger->($VLMAX, "Checking raf_list\n", Dumper($raf_list), "\n");
 
 $logger->($VLMAX, "  processing raf edge ", Dumper($target_edge), "\n");
 
-		my $new_raf_node = { id => generate_rand_node_id($cfg->{nodes}, q[new_raf_node_]), type => q/RAFILE/, name => $raf_list->{$target_edge_id}};  # Note: node id values must be unique
+		my $new_raf_node = { id => generate_random_node_id($cfg->{nodes}, q[new_raf_node_]), type => q/RAFILE/, name => $raf_list->{$target_edge_id}};  # Note: node id values must be unique
 		my $new_edge = { id => '___NEW_RAF_EDGE___', from => $new_raf_node->{id}, to => $target_edge->{to} };	  # TBD: edge id value should really be unique
 		$target_edge->{to} = $new_raf_node->{id};
 
