@@ -8,7 +8,7 @@
 			"reference":"bowtie2:db_prefix_reference_genome"
 		},
 		"outputs":{
-			"_stdout_":"ranksort"
+			"_stdout_":"samtobam"
 		}
 	}
 },
@@ -67,28 +67,10 @@
 			{"subst_constructor":{"vals":[ "--output-fmt-option", {"subst_constructor":{"vals":[ "level", {"subst":"s2b_compression_level","ifnull":0} ], "postproc":{"op":"concat", "pad":"="}}}]}},
 			"-"
 		]
-        },
-        {
-                "id":"ranksort",
-                "type":"EXEC",
-		"use_STDIN":true,
-		"use_STDOUT":true,
-		"cmd":[
-			"bamranksort",
-			{"subst_constructor":{"vals":[ "level", {"subst":"bamranksort_compression_level","ifnull":0} ], "postproc":{"op":"concat", "pad":"="}}},
-			{"subst_constructor":{"vals":[ "verbose", {"subst":"bamranksort_verbose"} ], "postproc":{"op":"concat", "pad":"="}}},
-			{"subst_constructor":{"vals":[ "md5", {"subst":"bamranksort_md5"} ], "postproc":{"op":"concat", "pad":"="}}},
-			{"subst_constructor":{"vals":[ "md5filename", {"subst":"bamranksort_md5_filename"} ], "postproc":{"op":"concat", "pad":"="}}},
-			{"subst_constructor":{"vals":[ "misordered", {"subst":"bamranksort_misordered"} ], "postproc":{"op":"concat", "pad":"="}}},
-			{"subst_constructor":{"vals":[ "step", {"subst":"bamranksort_step"} ], "postproc":{"op":"concat", "pad":"="}}},
-			{"subst_constructor":{"vals":[ "outputthreads", {"subst":"bamranksort_outputthreads"} ], "postproc":{"op":"concat", "pad":"="}}},
-			{"subst":"bamranksort_arbitrary_flags"}
-		]
         }
 ],
 "edges":[
 	{ "id":"bamtofastq_to_bowtie2", "from":"bamtofastq", "to":"bowtie2:fq" },
-	{ "id":"bowtie2_to_s2b", "from":"bowtie2", "to":"samtobam" },
-	{ "id":"s2b_to_ranksort", "from":"samtobam", "to":"ranksort" }
+	{ "id":"bowtie2_to_s2b", "from":"bowtie2", "to":"samtobam" }
 ]
 }

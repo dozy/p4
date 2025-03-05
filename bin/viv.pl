@@ -44,8 +44,8 @@ my $logger = mklogger($verbosity_level, $logfile, q[viv]);
 $logger->($VLMIN, 'viv.pl version '.($VERSION||q(unknown_not_deployed)).', running as '.$0);
 my $cfg_file_name = $ARGV[0];
 $cfg_file_name ||= q[test_cfg.json];
-my $raf_list = process_raf_list($opts{r});    # insert inline RAFILE nodes
-my $tee_list = process_raf_list($opts{t});    # insert tee with branch to RAFILE
+my $raf_list = preprocess_raf_list($opts{r});    # insert inline RAFILE nodes
+my $tee_list = preprocess_raf_list($opts{t});    # insert tee with branch to RAFILE
 $tee_list ||= {};
 
 my $s = read_file($cfg_file_name, binmode => ':utf8' );
@@ -54,10 +54,11 @@ my $cfg = from_json($s);
 
 if($cfg->{version}) { $TEMPLATE_VERSION = $cfg->{version}; }
 
-###############################################
-# insert any tees requested into the main graph
-###############################################
+###############################################################
+# insert any tees or RAFILE nodes requested into the main graph
+###############################################################
 process_tee_list($tee_list, $cfg);
+process_raf_list($raf_list, $cfg);
 
 my %all_nodes = (map { $_->{id} => $_ } @{$cfg->{nodes}});
 
@@ -729,7 +730,7 @@ sub mklogger {
 	}
 }
 
-sub process_raf_list {
+sub preprocess_raf_list {
 	my ($rafs) = @_;
 	my $raf_map;
 
@@ -738,6 +739,35 @@ sub process_raf_list {
 	}
 
 	return $raf_map;
+}
+
+###################################################################################################################
+# process raf_list, adding an RAFILE node between the "from" and "to" ports of the edge with specified id.
+#  In the raf_list hash, key identies edge, value specifies output file name
+#  Note: this will modify the master graph if $raf_list is defined and not empty. It is intended to be a debugging
+#   utility
+###################################################################################################################
+sub process_raf_list {
+	my ($raf_list, $cfg) = @_;
+
+	unless(defined $raf_list) {
+		return;
+	}
+
+	for my $target_edge_id (keys %{$raf_list}) {
+		my ($target_edge) = grep { $_->{id} eq $target_edge_id} @{$cfg->{edges}};
+
+		next unless(defined $target_edge);
+
+		my $new_raf_node = { id => q/new_raf_node/, type => q/RAFILE/, name => $raf_list->{$target_edge_id}};  # TBD: id value should really be unique
+		my $new_edge = { id => '___NEW_RAF_EDGE___', from => $new_raf_node, to => $target_edge->{to} };	  # TBD: id value should really be unique
+		$target_edge->{to} = $new_raf_node;
+
+		push @{$cfg->{nodes}}, $new_raf_node;
+		push @{$cfg->{edges}}, $new_edge;
+	}
+
+	return;
 }
 
 ###################################################################################################################
