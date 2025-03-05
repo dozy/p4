@@ -764,8 +764,8 @@ $logger->($VLMAX, "Checking raf_list\n", Dumper($raf_list), "\n");
 $logger->($VLMAX, "  processing raf edge ", Dumper($target_edge), "\n");
 
 		my $new_raf_node = { id => q/new_raf_node/, type => q/RAFILE/, name => $raf_list->{$target_edge_id}};  # TBD: id value should really be unique
-		my $new_edge = { id => '___NEW_RAF_EDGE___', from => $new_raf_node, to => $target_edge->{to} };	  # TBD: id value should really be unique
-		$target_edge->{to} = $new_raf_node;
+		my $new_edge = { id => '___NEW_RAF_EDGE___', from => $new_raf_node->{id}, to => $target_edge->{to} };	  # TBD: id value should really be unique
+		$target_edge->{to} = $new_raf_node->{id};
 
 $logger->($VLMAX, "  created new raf node:\n", Dumper($new_raf_node), "\n");
 $logger->($VLMAX, "  created new raf edge1:\n", Dumper($target_edge), "\n");
