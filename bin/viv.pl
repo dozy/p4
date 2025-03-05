@@ -786,7 +786,7 @@ sub generate_random_node_id {
 
 	do {
 		$ret=sprintf "%s%03d", $prefix, int(rand(100000));
-	} while (any { $_->id eq $ret } @{$nodes} and ($maxtry-- > 0));
+	} while (any { $_->{id} eq $ret } @{$nodes} and ($maxtry-- > 0));
 
 	if($maxtry <= 0) { croak q[Failed to generate randon node id]; }
 
