@@ -754,14 +754,22 @@ sub process_raf_list {
 		return;
 	}
 
+$logger->($VLMAX, "Checking raf_list\n", Dumper($raf_list), "\n");
+
 	for my $target_edge_id (keys %{$raf_list}) {
 		my ($target_edge) = grep { $_->{id} eq $target_edge_id} @{$cfg->{edges}};
 
 		next unless(defined $target_edge);
 
+$logger->($VLMAX, "  processing raf edge ", Dumper($target_edge), "\n");
+
 		my $new_raf_node = { id => q/new_raf_node/, type => q/RAFILE/, name => $raf_list->{$target_edge_id}};  # TBD: id value should really be unique
 		my $new_edge = { id => '___NEW_RAF_EDGE___', from => $new_raf_node, to => $target_edge->{to} };	  # TBD: id value should really be unique
 		$target_edge->{to} = $new_raf_node;
+
+$logger->($VLMAX, "  created new raf node:\n", Dumper($new_raf_node), "\n");
+$logger->($VLMAX, "  created new raf edge1:\n", Dumper($target_edge), "\n");
+$logger->($VLMAX, "  created new raf edge2:\n", Dumper($new_edge), "\n\n");
 
 		push @{$cfg->{nodes}}, $new_raf_node;
 		push @{$cfg->{edges}}, $new_edge;
