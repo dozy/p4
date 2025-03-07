@@ -146,7 +146,7 @@
 			"bam12auxmerge",
 			"level=0",
 			{"subst":"rankstrip_flag","required":"yes","ifnull":{"subst_constructor":{"vals":[ "rankstrip", {"subst":"rankstrip_val", "required":"yes", "ifnull":"1"} ],"postproc":{"op":"concat","pad":"="}}}},
-			"ranksplit=0",
+			{"subst":"ranksplit_flag","required":"yes","ifnull":{"subst_constructor":{"vals":[ "ranksplit", {"subst":"ranksplit_val", "required":"yes", "ifnull":"0"} ],"postproc":{"op":"concat","pad":"="}}}},
 			"zztoname=0",
 			{"subst":"clipreinsert_flag","required":"yes","ifnull":{"subst_constructor":{"vals":[ "clipreinsert", {"subst":"clipreinsert_val", "required":"yes", "ifnull":"1"} ],"postproc":{"op":"concat","pad":"="}}}},
 			{"port":"no_aln_bam", "direction":"in"}
