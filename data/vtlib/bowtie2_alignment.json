@@ -62,10 +62,18 @@
 		"use_STDIN":true,
 		"use_STDOUT":true,
 		"cmd":[
-			{"subst":"samtools_executable"}, "view", "-b",
-			{"subst_constructor":{"vals":[ "--threads", {"subst":"s2b_threads","ifnull":{"subst":"s2b_mt_val"}}]}},
-			{"subst_constructor":{"vals":[ "--output-fmt-option", {"subst_constructor":{"vals":[ "level", {"subst":"s2b_compression_level","ifnull":0} ], "postproc":{"op":"concat", "pad":"="}}}]}},
-			"-"
+			{"select":"post_aln_process", "required":true, "select_range":[1], "default":"bamconvert",
+			"cases":{
+				"bamconvert": [ {"subst":"samtools_executable"}, "view", "-u", "-" ],
+				"namesort": [ {"subst":"samtools_executable"}, "sort", "-n",  "-u", "-" ],
+				"ranksort": [
+						"bamranksort",
+						{"subst_constructor":{"vals":[ "step", {"subst":"s2b_brs_step","ifnull":2} ], "postproc":{"op":"concat", "pad":"="}}},
+						{"subst_constructor":{"vals":[ "misordered", {"subst":"s2b_brs_misordered","required":false} ], "postproc":{"op":"concat", "pad":"="}}},
+						{"subst_constructor":{"vals":[ "outputthreads", {"subst":"s2b_brs_othreads","required":false} ], "postproc":{"op":"concat", "pad":"="}}},
+						{"subst_constructor":{"vals":[ "verbose", {"subst":"s2b_brs_verbose","required":false} ], "postproc":{"op":"concat", "pad":"="}}}
+					]
+			}}
 		]
         }
 ],
