@@ -66,6 +66,7 @@
 			"cases":{
 				"bamconvert": [ {"subst":"samtools_executable"}, "view", "-u", "-" ],
 				"namesort": [ {"subst":"samtools_executable"}, "sort", "-n",  "-u", "-" ],
+				"fastcollate": [ {"subst":"samtools_executable"}, "collate", "-f",  "-u", "-O", "--threads", 3 ],
 				"ranksort": [
 						"bamranksort",
 						{"subst_constructor":{"vals":[ "step", {"subst":"s2b_brs_step","ifnull":2} ], "postproc":{"op":"concat", "pad":"="}}},
