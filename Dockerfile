@@ -5,6 +5,7 @@ ARG BIOBAMBAM2_VERSION="2.0.185-release-20221211202123"
 ARG BWA_VERSION="0.7.17"
 ARG BWA_MEM2_VERSION="2.2.1"
 ARG BOWTIE2_VERSION="2.5.4"
+ARG BOWTIE2_DG_VERSION="2.5.1"
 ARG DEFLATE_VERSION="1.20"
 ARG HTSLIB_VERSION="1.21"
 ARG IO_LIB_VERSION="1.15.0"
@@ -128,7 +129,7 @@ RUN curl -sSL -O "https://github.com/bwa-mem2/bwa-mem2/releases/download/v${BWA_
     cp ./bwa-mem2.sse42 /usr/local/bin/
 
 ARG BOWTIE2_VERSION
-RUN curl -sSL -O "https://github.com/BenLangmead/bowtie2/releases/download/v2.5.4/bowtie2-${BOWTIE2_VERSION}-linux-x86_64.zip" && \
+RUN curl -sSL -O "https://github.com/BenLangmead/bowtie2/releases/download/v${BOWTIE2_VERSION}/bowtie2-${BOWTIE2_VERSION}-linux-x86_64.zip" && \
     unzip ./bowtie2-${BOWTIE2_VERSION}-linux-x86_64.zip && \
     cd bowtie2-${BOWTIE2_VERSION}-linux-x86_64 && \
     cp ./bowtie2 /usr/local/bin/ && \
@@ -136,6 +137,17 @@ RUN curl -sSL -O "https://github.com/BenLangmead/bowtie2/releases/download/v2.5.
     cp ./bowtie2-align-l-debug /usr/local/bin/ && \
     cp ./bowtie2-align-s /usr/local/bin/ && \
     cp ./bowtie2-align-s-debug /usr/local/bin/
+
+ARG BOWTIE2_DG_VERSION
+RUN curl -sSL -O "https://github.com/BenLangmead/bowtie2/releases/download/v${BOWTIE2_DG_VERSION}/bowtie2-${BOWTIE2_DG_VERSION}-linux-x86_64.zip" && \
+    unzip ./bowtie2-${BOWTIE2_DG_VERSION}-linux-x86_64.zip && \
+    cd bowtie2-${BOWTIE2_DG_VERSION}-linux-x86_64 && \
+    mkdir -pv /usr/local/bin/alts/bowtie2-${BOWTIE2_DG_VERSION} && \
+    cp ./bowtie2 /usr/local/bin/alts/bowtie2-${BOWTIE2_DG_VERSION} && \
+    cp ./bowtie2-align-l /usr/local/bin/alts/bowtie2-${BOWTIE2_DG_VERSION} && \
+    cp ./bowtie2-align-l-debug /usr/local/bin/alts/bowtie2-${BOWTIE2_DG_VERSION} && \
+    cp ./bowtie2-align-s /usr/local/bin/alts/bowtie2-${BOWTIE2_DG_VERSION} && \
+    cp ./bowtie2-align-s-debug /usr/local/bin/alts/bowtie2-${BOWTIE2_DG_VERSION}
 
 ARG BAMBI_VERSION
 RUN git clone --single-branch --branch="$BAMBI_VERSION" --depth=1 "https://github.com/wtsi-npg/bambi.git" && \
